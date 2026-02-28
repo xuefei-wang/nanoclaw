@@ -36,6 +36,8 @@ interface ContainerOutput {
   newSessionId?: string;
   error?: string;
   toolTrace?: Array<Record<string, unknown>>;
+  input_tokens?: number;
+  output_tokens?: number;
 }
 
 interface SessionEntry {
@@ -405,6 +407,8 @@ async function runQuery(
   let resultCount = 0;
   let lastAssistantFallback: string | null = null;
   const toolTrace: Array<Record<string, unknown>> = [];
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -491,6 +495,14 @@ async function runQuery(
     toolTrace.push(record);
     if (toolTrace.length > 500) toolTrace.shift();
 
+    // Accumulate token usage from SDK messages
+    const msgAny = message as Record<string, unknown>;
+    if (msgAny.usage && typeof msgAny.usage === 'object') {
+      const usage = msgAny.usage as Record<string, number>;
+      totalInputTokens += usage.input_tokens || 0;
+      totalOutputTokens += usage.output_tokens || 0;
+    }
+
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
@@ -525,6 +537,8 @@ async function runQuery(
         result: textResult || null,
         newSessionId,
         toolTrace: toolTrace.slice(-200),
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
       });
       // Scheduled/bench tasks are single-shot: break immediately after
       // emitting the result so we don't block waiting for the SDK generator
@@ -544,6 +558,8 @@ async function runQuery(
       result: lastAssistantFallback,
       newSessionId,
       toolTrace: toolTrace.slice(-200),
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
     });
   }
 

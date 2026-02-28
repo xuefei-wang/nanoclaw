@@ -227,6 +227,8 @@ async function main(): Promise<void> {
         task_id: task.id,
         status: effectiveOutput.status,
         session_scope: runtime.session_scope,
+        input_tokens: effectiveOutput.input_tokens ?? 0,
+        output_tokens: effectiveOutput.output_tokens ?? 0,
       },
     };
     process.stdout.write(JSON.stringify(output) + '\n');
