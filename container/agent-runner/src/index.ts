@@ -499,7 +499,9 @@ async function runQuery(
     const msgAny = message as Record<string, unknown>;
     if (msgAny.usage && typeof msgAny.usage === 'object') {
       const usage = msgAny.usage as Record<string, number>;
-      totalInputTokens += usage.input_tokens || 0;
+      totalInputTokens += (usage.input_tokens || 0)
+        + (usage.cache_creation_input_tokens || 0)
+        + (usage.cache_read_input_tokens || 0);
       totalOutputTokens += usage.output_tokens || 0;
     }
 
