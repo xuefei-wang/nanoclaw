@@ -165,19 +165,14 @@ function buildVolumeMounts(
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(
-    projectRoot,
-    'container',
-    'agent-runner',
-    'src',
-  );
-  const groupAgentRunnerDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    'agent-runner-src',
-  );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+  const agentRunnerSrcCandidates = [
+    path.join(projectRoot, 'container', 'agent-runner', 'src'),
+    path.join(projectRoot, 'NanoClaw', 'container', 'agent-runner', 'src'),
+  ];
+  const agentRunnerSrc = agentRunnerSrcCandidates.find((p) => fs.existsSync(p));
+  const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
+  if (agentRunnerSrc) {
+    fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
@@ -204,7 +199,15 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const fromFile = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const out: Record<string, string> = { ...fromFile };
+  if (!out.CLAUDE_CODE_OAUTH_TOKEN && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    out.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  }
+  if (!out.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY) {
+    out.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  }
+  return out;
 }
 
 function buildContainerArgs(
@@ -347,6 +350,16 @@ export async function runContainerAgent(
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
+            // Bench/scheduled runs are single-task executions: request clean
+            // container shutdown right after first emitted output marker.
+            if (input.isScheduledTask) {
+              try {
+                const closePath = path.join(resolveGroupIpcPath(group.folder), 'input', '_close');
+                fs.writeFileSync(closePath, '');
+              } catch {
+                // best-effort signal
+              }
+            }
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
