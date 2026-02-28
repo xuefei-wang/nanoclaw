@@ -18,7 +18,10 @@ const level = process.env.LOG_LEVEL || 'info';
 const enablePretty = process.env.NANOCLAW_PRETTY_LOGS === '1';
 const logger = pino(
   enablePretty
-    ? { level, transport: { target: 'pino-pretty', options: { colorize: true } } }
+    ? {
+        level,
+        transport: { target: 'pino-pretty', options: { colorize: true } },
+      }
     : { level },
 );
 

@@ -67,7 +67,10 @@ function safeSlug(value: string): string {
   return value.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
 }
 
-function writeWorkspace(groupFolder: string, seed: TaskPayload['workspace_seed']): void {
+function writeWorkspace(
+  groupFolder: string,
+  seed: TaskPayload['workspace_seed'],
+): void {
   const workspaceDir = path.join(GROUPS_DIR, groupFolder, 'workspace');
   fs.mkdirSync(workspaceDir, { recursive: true });
 
@@ -92,7 +95,10 @@ function writeWorkspace(groupFolder: string, seed: TaskPayload['workspace_seed']
       fs.cpSync(repoSrcPath, repoDestDir, { recursive: true });
     } else {
       fs.mkdirSync(repoDestDir, { recursive: true });
-      fs.copyFileSync(repoSrcPath, path.join(repoDestDir, path.basename(repoSrcPath)));
+      fs.copyFileSync(
+        repoSrcPath,
+        path.join(repoDestDir, path.basename(repoSrcPath)),
+      );
     }
   } else {
     // Write a placeholder so /workspace/group/workspace/repo exists
@@ -145,7 +151,14 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const { generation, agent_id, task, workspace_seed, execution_prompt, runtime } = payload;
+  const {
+    generation,
+    agent_id,
+    task,
+    workspace_seed,
+    execution_prompt,
+    runtime,
+  } = payload;
 
   // Unique folder per task execution (prevents cross-contamination)
   const uid = randomUUID().slice(0, 8);
@@ -166,9 +179,12 @@ async function main(): Promise<void> {
     };
 
     const secrets: Record<string, string> = {};
-    if (process.env.ANTHROPIC_API_KEY) secrets.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    if (process.env.CLAUDE_CODE_OAUTH_TOKEN) secrets.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    if (process.env.LLM_API_KEY && !secrets.ANTHROPIC_API_KEY) secrets.ANTHROPIC_API_KEY = process.env.LLM_API_KEY;
+    if (process.env.ANTHROPIC_API_KEY)
+      secrets.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    if (process.env.CLAUDE_CODE_OAUTH_TOKEN)
+      secrets.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    if (process.env.LLM_API_KEY && !secrets.ANTHROPIC_API_KEY)
+      secrets.ANTHROPIC_API_KEY = process.env.LLM_API_KEY;
 
     // 3. Run the container agent (single-shot via isScheduledTask)
     // Pass onOutput so the streaming parser catches OUTPUT markers in
@@ -187,18 +203,24 @@ async function main(): Promise<void> {
         isScheduledTask: true,
         secrets,
       },
-      (_proc, _name) => { /* no-op process callback */ },
-      async (output) => { lastOutput = output; },
+      (_proc, _name) => {
+        /* no-op process callback */
+      },
+      async (output) => {
+        lastOutput = output;
+      },
     );
 
     // 4. Emit result JSON to stdout
     // In streaming mode, runContainerAgent returns a completion marker
     // { status: 'success', result: null }.  The actual result text was
     // captured by the onOutput callback in lastOutput.  Prefer it.
-    const effectiveOutput = (lastOutput?.result != null) ? lastOutput : containerOutput;
+    const effectiveOutput =
+      lastOutput?.result != null ? lastOutput : containerOutput;
     const output = {
       result: effectiveOutput.result ?? effectiveOutput.error ?? '',
-      tool_trace: (effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? [],
+      tool_trace:
+        (effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? [],
       meta: {
         generation,
         agent_id,

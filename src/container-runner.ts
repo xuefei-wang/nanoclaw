@@ -170,7 +170,12 @@ function buildVolumeMounts(
     path.join(projectRoot, 'NanoClaw', 'container', 'agent-runner', 'src'),
   ];
   const agentRunnerSrc = agentRunnerSrcCandidates.find((p) => fs.existsSync(p));
-  const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
+  const groupAgentRunnerDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    'agent-runner-src',
+  );
   if (agentRunnerSrc) {
     fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
@@ -199,7 +204,10 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  const fromFile = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const fromFile = readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+  ]);
   const out: Record<string, string> = { ...fromFile };
   if (!out.CLAUDE_CODE_OAUTH_TOKEN && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     out.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -354,7 +362,11 @@ export async function runContainerAgent(
             // container shutdown right after first emitted output marker.
             if (input.isScheduledTask) {
               try {
-                const closePath = path.join(resolveGroupIpcPath(group.folder), 'input', '_close');
+                const closePath = path.join(
+                  resolveGroupIpcPath(group.folder),
+                  'input',
+                  '_close',
+                );
                 fs.writeFileSync(closePath, '');
               } catch {
                 // best-effort signal
