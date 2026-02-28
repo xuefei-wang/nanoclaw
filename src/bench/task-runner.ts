@@ -32,7 +32,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 
-import { runContainerAgent } from '../container-runner.js';
+import { runContainerAgent, ContainerOutput } from '../container-runner.js';
 import { GROUPS_DIR, DATA_DIR } from '../config.js';
 import { RegisteredGroup } from '../types.js';
 
@@ -171,6 +171,12 @@ async function main(): Promise<void> {
     if (process.env.LLM_API_KEY && !secrets.ANTHROPIC_API_KEY) secrets.ANTHROPIC_API_KEY = process.env.LLM_API_KEY;
 
     // 3. Run the container agent (single-shot via isScheduledTask)
+    // Pass onOutput so the streaming parser catches OUTPUT markers in
+    // real-time.  Without it, the container-runner skips marker parsing
+    // and relies on the legacy parser, which only runs on clean exit.
+    // If the SDK's query() generator hangs after the result, the
+    // container times out and the output is lost.
+    let lastOutput: ContainerOutput | undefined;
     const containerOutput = await runContainerAgent(
       group,
       {
@@ -182,17 +188,22 @@ async function main(): Promise<void> {
         secrets,
       },
       (_proc, _name) => { /* no-op process callback */ },
+      async (output) => { lastOutput = output; },
     );
 
     // 4. Emit result JSON to stdout
+    // In streaming mode, runContainerAgent returns a completion marker
+    // { status: 'success', result: null }.  The actual result text was
+    // captured by the onOutput callback in lastOutput.  Prefer it.
+    const effectiveOutput = (lastOutput?.result != null) ? lastOutput : containerOutput;
     const output = {
-      result: containerOutput.result ?? containerOutput.error ?? '',
-      tool_trace: (containerOutput as unknown as Record<string, unknown>).toolTrace ?? [],
+      result: effectiveOutput.result ?? effectiveOutput.error ?? '',
+      tool_trace: (effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? [],
       meta: {
         generation,
         agent_id,
         task_id: task.id,
-        status: containerOutput.status,
+        status: effectiveOutput.status,
         session_scope: runtime.session_scope,
       },
     };

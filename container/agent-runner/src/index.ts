@@ -526,6 +526,13 @@ async function runQuery(
         newSessionId,
         toolTrace: toolTrace.slice(-200),
       });
+      // Scheduled/bench tasks are single-shot: break immediately after
+      // emitting the result so we don't block waiting for the SDK generator
+      // to complete (the CLI subprocess may linger after producing its result).
+      if (containerInput.isScheduledTask) {
+        log('Scheduled task: result received, breaking out of query loop');
+        break;
+      }
     }
   }
 
