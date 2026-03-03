@@ -4,7 +4,10 @@ import path from 'path';
 
 import { runContainerAgent } from '../container-runner.js';
 import { DATA_DIR } from '../config.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from '../group-folder.js';
+import {
+  resolveGroupFolderPath,
+  resolveGroupIpcPath,
+} from '../group-folder.js';
 import { RegisteredGroup } from '../types.js';
 
 type RuntimeScope = 'task' | 'agent';
@@ -191,7 +194,10 @@ function listFilesRecursive(root: string): string[] {
   return out;
 }
 
-function collectNativeSessionMemory(groupFolder: string, maxChars = 240000): string {
+function collectNativeSessionMemory(
+  groupFolder: string,
+  maxChars = 240000,
+): string {
   const claudeRoot = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
   const files = listFilesRecursive(claudeRoot).filter(
     (p) => p.endsWith('.jsonl') || p.endsWith('.md') || p.endsWith('.txt'),
@@ -258,8 +264,10 @@ async function main(): Promise<void> {
   }
 
   const payload = readJsonFile<SwarmsPayload>(payloadPath);
-  const scope: RuntimeScope = payload.runtime?.session_scope === 'agent' ? 'agent' : 'task';
-  const wipeWorkspacePerTask = payload.runtime?.wipe_workspace_per_task !== false;
+  const scope: RuntimeScope =
+    payload.runtime?.session_scope === 'agent' ? 'agent' : 'task';
+  const wipeWorkspacePerTask =
+    payload.runtime?.wipe_workspace_per_task !== false;
   const groupFolder = toGroupFolder(payload, scope);
 
   seedWorkspace(payload, groupFolder, wipeWorkspacePerTask);
@@ -324,7 +332,7 @@ async function main(): Promise<void> {
     saveSessionForAgent(payload.agent_id, latestSessionId);
   }
 
-  const merged = outputs.join('\n\n').trim() || (result.result || '');
+  const merged = outputs.join('\n\n').trim() || result.result || '';
   const meta = {
     generation: payload.generation,
     agent_id: payload.agent_id,
