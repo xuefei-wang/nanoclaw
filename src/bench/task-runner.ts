@@ -343,7 +343,7 @@ async function main(): Promise<void> {
         group_folder: groupFolder,
         session_id: latestSessionId || '',
         active_task_dir: `/workspace/group/workspace/tasks/${safeTaskDir(payload.task?.id || 'task')}`,
-        model_requested: process.env.LLM_MODEL || '',
+        model_requested: process.env.MODEL || '',
         native_session_memory: collectNativeSessionMemory(groupFolder),
       },
     };
