@@ -432,10 +432,16 @@ async function runQuery(
   if (extraDirs.length > 0) {
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
+  const selectedModel =
+    sdkEnv.LLM_MODEL || sdkEnv.CLAUDE_CODE_MODEL || sdkEnv.ANTHROPIC_MODEL;
+  if (selectedModel) {
+    log(`Using model: ${selectedModel}`);
+  }
 
   for await (const message of query({
     prompt: stream,
     options: {
+      model: selectedModel || undefined,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,

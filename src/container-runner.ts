@@ -228,6 +228,14 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+  // Forward explicit model selection into the container so the SDK does not
+  // silently fall back to ambient/default model resolution.
+  for (const key of ['LLM_MODEL', 'CLAUDE_CODE_MODEL', 'ANTHROPIC_MODEL']) {
+    const value = process.env[key];
+    if (value && value.trim()) {
+      args.push('-e', `${key}=${value}`);
+    }
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
