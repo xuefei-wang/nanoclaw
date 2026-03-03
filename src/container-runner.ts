@@ -228,9 +228,9 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
-  // Forward explicit model selection into the container so the SDK does not
-  // silently fall back to ambient/default model resolution.
-  for (const key of ['LLM_MODEL', 'CLAUDE_CODE_MODEL', 'ANTHROPIC_MODEL']) {
+  // Forward explicit provider/model/auth selection into the container so the SDK
+  // does not silently fall back to ambient/default model resolution.
+  for (const key of ['MODEL_PROVIDER', 'MODEL', 'MODEL_AUTH_MODE']) {
     const value = process.env[key];
     if (value && value.trim()) {
       args.push('-e', `${key}=${value}`);

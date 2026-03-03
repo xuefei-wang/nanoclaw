@@ -432,8 +432,7 @@ async function runQuery(
   if (extraDirs.length > 0) {
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
-  const selectedModel =
-    sdkEnv.LLM_MODEL || sdkEnv.CLAUDE_CODE_MODEL || sdkEnv.ANTHROPIC_MODEL;
+  const selectedModel = sdkEnv.MODEL;
   if (selectedModel) {
     log(`Using model: ${selectedModel}`);
   }
