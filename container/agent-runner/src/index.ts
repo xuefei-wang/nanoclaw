@@ -35,6 +35,9 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  toolTrace?: Array<Record<string, unknown>>;
+  input_tokens?: number;
+  output_tokens?: number;
 }
 
 interface SessionEntry {
@@ -227,6 +230,18 @@ interface ParsedMessage {
   content: string;
 }
 
+function extractAssistantText(message: unknown): string | null {
+  const msg = message as { message?: { content?: unknown } };
+  const content = msg.message?.content;
+  if (!Array.isArray(content)) return null;
+  const parts = content
+    .filter((c) => typeof c === 'object' && c !== null && (c as { type?: string }).type === 'text')
+    .map((c) => String((c as { text?: unknown }).text ?? ''))
+    .join('')
+    .trim();
+  return parts || null;
+}
+
 function parseTranscript(content: string): ParsedMessage[] {
   const messages: ParsedMessage[] = [];
 
@@ -390,6 +405,10 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let lastAssistantFallback: string | null = null;
+  const toolTrace: Array<Record<string, unknown>> = [];
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -458,9 +477,47 @@ async function runQuery(
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
+    const subtype = (message as { subtype?: string }).subtype;
+    const record: Record<string, unknown> = {
+      idx: messageCount,
+      type: message.type,
+      subtype: subtype || null,
+      ts: new Date().toISOString(),
+    };
+    const maybeToolName = (message as { tool_name?: string }).tool_name;
+    if (maybeToolName) record.tool_name = maybeToolName;
+    const maybeToolUseId = (message as { tool_use_id?: string }).tool_use_id;
+    if (maybeToolUseId) record.tool_use_id = maybeToolUseId;
+    const maybeResult = (message as { result?: string }).result;
+    if (typeof maybeResult === 'string' && maybeResult.trim()) {
+      record.result_excerpt = maybeResult.slice(0, 240);
+    }
+    toolTrace.push(record);
+    if (toolTrace.length > 500) toolTrace.shift();
+
+    // Accumulate token usage from SDK messages
+    const msgAny = message as Record<string, unknown>;
+    if (msgAny.usage && typeof msgAny.usage === 'object') {
+      const usage = msgAny.usage as Record<string, number>;
+      totalInputTokens += (usage.input_tokens || 0)
+        + (usage.cache_creation_input_tokens || 0)
+        + (usage.cache_read_input_tokens || 0);
+      totalOutputTokens += usage.output_tokens || 0;
+    }
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+    }
+
+    if (containerInput.isScheduledTask && message.type === 'assistant') {
+      const assistantText = extractAssistantText(message);
+      lastAssistantFallback = assistantText || (() => {
+        try {
+          return JSON.stringify(message).slice(0, 4000);
+        } catch {
+          return '[assistant_message_without_text]';
+        }
+      })();
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -480,9 +537,32 @@ async function runQuery(
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        toolTrace: toolTrace.slice(-200),
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
       });
+      // Scheduled/bench tasks are single-shot: break immediately after
+      // emitting the result so we don't block waiting for the SDK generator
+      // to complete (the CLI subprocess may linger after producing its result).
+      if (containerInput.isScheduledTask) {
+        log('Scheduled task: result received, breaking out of query loop');
+        break;
+      }
     }
+  }
+
+  // Scheduled/bench safety fallback: if SDK stream ended without an explicit
+  // `result` message, emit the latest assistant text so callers still get output.
+  if (containerInput.isScheduledTask && resultCount === 0 && lastAssistantFallback) {
+    writeOutput({
+      status: 'success',
+      result: lastAssistantFallback,
+      newSessionId,
+      toolTrace: toolTrace.slice(-200),
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
+    });
   }
 
   ipcPolling = false;
@@ -555,6 +635,12 @@ async function main(): Promise<void> {
       if (queryResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
+      }
+
+      // Bench/scheduled mode is single-shot: do not wait for IPC follow-ups.
+      if (containerInput.isScheduledTask) {
+        log('Scheduled task mode: single-shot query complete, exiting');
+        process.exit(0);
       }
 
       // Emit session update so host can track it
