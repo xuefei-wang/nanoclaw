@@ -2,12 +2,9 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { runContainerAgent } from '../container-runner.js';
-import { DATA_DIR } from '../config.js';
-import {
-  resolveGroupFolderPath,
-  resolveGroupIpcPath,
-} from '../group-folder.js';
+import { runContainerAgent, ContainerOutput } from '../container-runner.js';
+import { DATA_DIR, GROUPS_DIR } from '../config.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { RegisteredGroup } from '../types.js';
 
 type RuntimeScope = 'task' | 'agent';
@@ -20,6 +17,7 @@ interface RuntimeConfig {
 interface WorkspaceSeed {
   instruction_md?: string;
   insights_md?: string;
+  memory_md?: string;
   task_md?: string;
   repo_source_path?: string;
 }
@@ -114,9 +112,11 @@ function seedWorkspace(
   const seed = payload.workspace_seed || {};
   const instruction = (seed.instruction_md || '').trim() + '\n';
   const insights = (seed.insights_md || '').trim() + '\n';
+  const memory = (seed.memory_md || '').trim() + '\n';
   const taskMd = (seed.task_md || '').trim() + '\n';
 
   writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
+  writeText(path.join(workspaceRoot, 'MEMORY.md'), memory);
   writeText(path.join(workspaceRoot, 'INSIGHTS.md'), insights);
   const tasksRoot = path.join(workspaceRoot, 'tasks');
   ensureDir(tasksRoot);
@@ -163,11 +163,19 @@ function saveSessionForAgent(agentId: string, sessionId: string): void {
   writeText(p, JSON.stringify({ session_id: sessionId }, null, 2) + '\n');
 }
 
-function closeSentinel(groupFolder: string): void {
-  const ipcDir = resolveGroupIpcPath(groupFolder);
-  const inputDir = path.join(ipcDir, 'input');
-  ensureDir(inputDir);
-  writeText(path.join(inputDir, '_close'), '1\n');
+function cleanupGroup(groupFolder: string): void {
+  const dirs = [
+    path.join(GROUPS_DIR, groupFolder),
+    path.join(DATA_DIR, 'sessions', groupFolder),
+    path.join(DATA_DIR, 'ipc', groupFolder),
+  ];
+  for (const dir of dirs) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+  }
 }
 
 function listFilesRecursive(root: string): string[] {
@@ -285,77 +293,68 @@ async function main(): Promise<void> {
     requiresTrigger: false,
   };
 
-  const outputs: string[] = [];
-  let latestSessionId: string | undefined = sessionId;
-  let closeScheduled = false;
+  try {
+    let lastOutput: ContainerOutput | undefined;
+    let latestSessionId: string | undefined = sessionId;
 
-  const result = await runContainerAgent(
-    group,
-    {
-      prompt: buildPrompt(payload),
-      sessionId,
-      groupFolder,
-      chatJid: `swarm-${payload.agent_id}`,
-      isMain: false,
-      isScheduledTask: false,
-      assistantName: 'Swarms',
-    },
-    () => {},
-    async (streamed) => {
-      if (streamed.newSessionId) {
-        latestSessionId = streamed.newSessionId;
-      }
-      if (streamed.result) {
-        outputs.push(streamed.result);
-        if (!closeScheduled) {
-          closeScheduled = true;
-          setTimeout(() => {
-            try {
-              closeSentinel(groupFolder);
-            } catch {
-              // best-effort close signal
-            }
-          }, 1000);
-        }
-      }
-    },
-  );
-
-  if (result.status !== 'success') {
-    die(result.error || 'container run failed');
-  }
-
-  if (!latestSessionId && result.newSessionId) {
-    latestSessionId = result.newSessionId;
-  }
-  if (scope === 'agent' && latestSessionId) {
-    saveSessionForAgent(payload.agent_id, latestSessionId);
-  }
-
-  const merged = outputs.join('\n\n').trim() || result.result || '';
-  const meta = {
-    generation: payload.generation,
-    agent_id: payload.agent_id,
-    task_id: payload.task?.id || '',
-    group_folder: groupFolder,
-    session_scope: scope,
-    session_id: latestSessionId || '',
-    active_task_dir: `/workspace/group/workspace/tasks/${safeTaskDir(payload.task?.id || 'task')}`,
-    model_requested: process.env.LLM_MODEL || '',
-    native_session_memory: collectNativeSessionMemory(groupFolder),
-  };
-
-  process.stdout.write(
-    JSON.stringify(
+    const result = await runContainerAgent(
+      group,
       {
-        result: merged,
-        tool_trace: [],
-        meta,
+        prompt: buildPrompt(payload),
+        sessionId,
+        groupFolder,
+        chatJid: `swarm-${payload.agent_id}`,
+        isMain: false,
+        isScheduledTask: true,
+        assistantName: 'Swarms',
       },
-      null,
-      0,
-    ) + '\n',
-  );
+      () => {},
+      async (streamed) => {
+        lastOutput = streamed;
+        if (streamed.newSessionId) {
+          latestSessionId = streamed.newSessionId;
+        }
+      },
+    );
+
+    if (!latestSessionId && result.newSessionId) {
+      latestSessionId = result.newSessionId;
+    }
+    if (scope === 'agent' && latestSessionId) {
+      saveSessionForAgent(payload.agent_id, latestSessionId);
+    }
+
+    // Prefer streaming output (lastOutput) over the final completion marker
+    // which may have result: null when the real result was captured via onOutput.
+    const effectiveOutput = lastOutput?.result != null ? lastOutput : result;
+
+    const output = {
+      result: effectiveOutput.result ?? effectiveOutput.error ?? '',
+      tool_trace:
+        (effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? [],
+      meta: {
+        generation: payload.generation,
+        agent_id: payload.agent_id,
+        task_id: payload.task?.id || '',
+        status: effectiveOutput.status,
+        session_scope: scope,
+        input_tokens: effectiveOutput.input_tokens ?? 0,
+        output_tokens: effectiveOutput.output_tokens ?? 0,
+        group_folder: groupFolder,
+        session_id: latestSessionId || '',
+        active_task_dir: `/workspace/group/workspace/tasks/${safeTaskDir(payload.task?.id || 'task')}`,
+        model_requested: process.env.LLM_MODEL || '',
+        native_session_memory: collectNativeSessionMemory(groupFolder),
+      },
+    };
+    process.stdout.write(JSON.stringify(output) + '\n');
+  } finally {
+    // Clean up ephemeral group folders in task scope; agent scope retains
+    // the group folder for session persistence across tasks.
+    if (scope === 'task' && wipeWorkspacePerTask) {
+      cleanupGroup(groupFolder);
+    }
+  }
 }
 
 main().catch((err) => {
