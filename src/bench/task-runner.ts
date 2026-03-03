@@ -1,246 +1,356 @@
-/**
- * Swarms bench task runner — single-shot NanoClaw executor.
- *
- * Usage:
- *   npx tsx src/bench/task-runner.ts <payload.json>
- *   npm run bench:task -- <payload.json>
- *
- * Input (payload.json):
- *   {
- *     "generation": int,
- *     "agent_id": string,
- *     "task": { "id": str, "repo": str, "prompt": str, "metadata": {} },
- *     "workspace_seed": {
- *       "instruction_md": str,
- *       "insights_md":   str,
- *       "memory_md":     str,
- *       "task_md":       str,
- *       "repo_source_path": str   // optional host path to copy
- *     },
- *     "execution_prompt": str,
- *     "runtime": {
- *       "session_scope": "task" | "agent",
- *       "wipe_workspace_per_task": bool
- *     }
- *   }
- *
- * Output (stdout, single JSON line):
- *   { "result": str, "tool_trace": [...], "meta": {} }
- */
-
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { randomUUID } from 'crypto';
 
-import { runContainerAgent, ContainerOutput } from '../container-runner.js';
-import { GROUPS_DIR, DATA_DIR } from '../config.js';
+import { runContainerAgent } from '../container-runner.js';
+import { DATA_DIR } from '../config.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from '../group-folder.js';
 import { RegisteredGroup } from '../types.js';
 
-// ── Payload types ────────────────────────────────────────────────────────────
+type RuntimeScope = 'task' | 'agent';
+
+interface RuntimeConfig {
+  session_scope?: RuntimeScope;
+  wipe_workspace_per_task?: boolean;
+}
+
+interface WorkspaceSeed {
+  instruction_md?: string;
+  insights_md?: string;
+  task_md?: string;
+  repo_source_path?: string;
+}
 
 interface TaskPayload {
+  id: string;
+  repo?: string;
+  prompt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface SwarmsPayload {
   generation: number;
   agent_id: string;
-  task: {
-    id: string;
-    repo: string;
-    prompt: string;
-    metadata: Record<string, unknown>;
-  };
-  workspace_seed: {
-    instruction_md: string;
-    insights_md: string;
-    memory_md: string;
-    task_md: string;
-    repo_source_path?: string;
-  };
-  execution_prompt: string;
-  runtime: {
-    session_scope: 'task' | 'agent';
-    wipe_workspace_per_task: boolean;
-  };
+  task: TaskPayload;
+  workspace_seed?: WorkspaceSeed;
+  execution_prompt?: string;
+  runtime?: RuntimeConfig;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function safeSlug(value: string): string {
-  return value.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
+interface SessionState {
+  session_id: string;
 }
 
-function writeWorkspace(
+function die(msg: string): never {
+  throw new Error(msg);
+}
+
+function readJsonFile<T>(filePath: string): T {
+  const raw = fs.readFileSync(filePath, 'utf-8');
+  return JSON.parse(raw) as T;
+}
+
+function shortHash(input: string): string {
+  return crypto.createHash('sha1').update(input).digest('hex').slice(0, 10);
+}
+
+function safeTaskDir(taskId: string): string {
+  const cleaned = (taskId || 'task').replace(/[^a-zA-Z0-9._-]/g, '_');
+  return cleaned || 'task';
+}
+
+function toGroupFolder(payload: SwarmsPayload, scope: RuntimeScope): string {
+  if (scope === 'agent') {
+    return payload.agent_id;
+  }
+  const task = payload.task?.id || 'task';
+  const token = shortHash(`${payload.generation}:${payload.agent_id}:${task}`);
+  return `${payload.agent_id}__t_${token}`;
+}
+
+function ensureDir(p: string): void {
+  fs.mkdirSync(p, { recursive: true });
+}
+
+function writeText(filePath: string, content: string): void {
+  ensureDir(path.dirname(filePath));
+  fs.writeFileSync(filePath, content, 'utf-8');
+}
+
+function copyRepo(repoSourcePath: string, repoDst: string): void {
+  if (!repoSourcePath) {
+    ensureDir(repoDst);
+    writeText(path.join(repoDst, '.keep'), '');
+    return;
+  }
+
+  const src = path.resolve(repoSourcePath);
+  if (!fs.existsSync(src) || !fs.statSync(src).isDirectory()) {
+    ensureDir(repoDst);
+    writeText(path.join(repoDst, '.keep'), '');
+    return;
+  }
+
+  fs.cpSync(src, repoDst, { recursive: true });
+}
+
+function seedWorkspace(
+  payload: SwarmsPayload,
   groupFolder: string,
-  seed: TaskPayload['workspace_seed'],
+  wipeWorkspacePerTask: boolean,
 ): void {
-  const workspaceDir = path.join(GROUPS_DIR, groupFolder, 'workspace');
-  fs.mkdirSync(workspaceDir, { recursive: true });
+  const groupDir = resolveGroupFolderPath(groupFolder);
+  ensureDir(groupDir);
 
-  const writeIfNotEmpty = (filename: string, content: string): void => {
-    if (content && content.trim()) {
-      fs.writeFileSync(path.join(workspaceDir, filename), content, 'utf-8');
-    }
-  };
+  const workspaceRoot = path.join(groupDir, 'workspace');
+  if (wipeWorkspacePerTask) {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+  ensureDir(workspaceRoot);
 
-  writeIfNotEmpty('TASK.md', seed.task_md);
-  writeIfNotEmpty('INSTRUCTION.md', seed.instruction_md);
-  writeIfNotEmpty('MEMORY.md', seed.memory_md);
-  writeIfNotEmpty('INSIGHTS.md', seed.insights_md);
+  const seed = payload.workspace_seed || {};
+  const instruction = (seed.instruction_md || '').trim() + '\n';
+  const insights = (seed.insights_md || '').trim() + '\n';
+  const taskMd = (seed.task_md || '').trim() + '\n';
 
-  // Copy repo source if provided
-  const repoSrcPath = seed.repo_source_path;
-  if (repoSrcPath && fs.existsSync(repoSrcPath)) {
-    const repoDestDir = path.join(workspaceDir, 'repo');
-    fs.rmSync(repoDestDir, { recursive: true, force: true });
-    const stat = fs.statSync(repoSrcPath);
-    if (stat.isDirectory()) {
-      fs.cpSync(repoSrcPath, repoDestDir, { recursive: true });
-    } else {
-      fs.mkdirSync(repoDestDir, { recursive: true });
-      fs.copyFileSync(
-        repoSrcPath,
-        path.join(repoDestDir, path.basename(repoSrcPath)),
-      );
-    }
-  } else {
-    // Write a placeholder so /workspace/group/workspace/repo exists
-    const repoDestDir = path.join(workspaceDir, 'repo');
-    fs.mkdirSync(repoDestDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(repoDestDir, 'README.md'),
-      `# ${seed.task_md.match(/task_id:\s*(\S+)/)?.[1] ?? 'task'}\nNo repo source path provided.\n`,
-      'utf-8',
-    );
+  writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
+  writeText(path.join(workspaceRoot, 'INSIGHTS.md'), insights);
+  const tasksRoot = path.join(workspaceRoot, 'tasks');
+  ensureDir(tasksRoot);
+
+  const taskFolder = safeTaskDir(payload.task?.id || 'task');
+  const taskRoot = path.join(tasksRoot, taskFolder);
+  if (wipeWorkspacePerTask) {
+    fs.rmSync(taskRoot, { recursive: true, force: true });
+  }
+  ensureDir(taskRoot);
+  writeText(path.join(taskRoot, 'TASK.md'), taskMd);
+
+  const repoDst = path.join(taskRoot, 'repo');
+  fs.rmSync(repoDst, { recursive: true, force: true });
+  copyRepo(seed.repo_source_path || '', repoDst);
+}
+
+function sessionStateRoot(): string {
+  const configured = (process.env.NANOCLAW_SESSION_STATE_ROOT || '').trim();
+  if (configured) {
+    return path.resolve(configured);
+  }
+  return path.resolve('workspaces');
+}
+
+function sessionStatePath(agentId: string): string {
+  return path.join(sessionStateRoot(), agentId, '.nanoclaw_session.json');
+}
+
+function loadSessionForAgent(agentId: string): string | undefined {
+  const p = sessionStatePath(agentId);
+  if (!fs.existsSync(p)) return undefined;
+  try {
+    const data = readJsonFile<SessionState>(p);
+    return data.session_id || undefined;
+  } catch {
+    return undefined;
   }
 }
 
-function cleanupGroup(groupFolder: string): void {
-  try {
-    const groupDir = path.join(GROUPS_DIR, groupFolder);
-    fs.rmSync(groupDir, { recursive: true, force: true });
-  } catch {
-    // best-effort
-  }
-  try {
-    const sessionDir = path.join(DATA_DIR, 'sessions', groupFolder);
-    fs.rmSync(sessionDir, { recursive: true, force: true });
-  } catch {
-    // best-effort
-  }
-  try {
-    const ipcDir = path.join(DATA_DIR, 'ipc', groupFolder);
-    fs.rmSync(ipcDir, { recursive: true, force: true });
-  } catch {
-    // best-effort
-  }
+function saveSessionForAgent(agentId: string, sessionId: string): void {
+  const p = sessionStatePath(agentId);
+  ensureDir(path.dirname(p));
+  writeText(p, JSON.stringify({ session_id: sessionId }, null, 2) + '\n');
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+function closeSentinel(groupFolder: string): void {
+  const ipcDir = resolveGroupIpcPath(groupFolder);
+  const inputDir = path.join(ipcDir, 'input');
+  ensureDir(inputDir);
+  writeText(path.join(inputDir, '_close'), '1\n');
+}
+
+function listFilesRecursive(root: string): string[] {
+  if (!fs.existsSync(root)) return [];
+  const out: string[] = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const cur = stack.pop() as string;
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(cur, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const p = path.join(cur, e.name);
+      if (e.isDirectory()) {
+        stack.push(p);
+      } else if (e.isFile()) {
+        out.push(p);
+      }
+    }
+  }
+  return out;
+}
+
+function collectNativeSessionMemory(groupFolder: string, maxChars = 240000): string {
+  const claudeRoot = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
+  const files = listFilesRecursive(claudeRoot).filter(
+    (p) => p.endsWith('.jsonl') || p.endsWith('.md') || p.endsWith('.txt'),
+  );
+  if (files.length === 0) return '';
+
+  files.sort((a, b) => {
+    try {
+      return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+    } catch {
+      return 0;
+    }
+  });
+
+  const blocks: string[] = [];
+  let total = 0;
+  for (const f of files.slice(0, 8)) {
+    try {
+      const raw = fs.readFileSync(f, 'utf-8');
+      if (!raw.trim()) continue;
+      const rel = path.relative(claudeRoot, f);
+      let chunk = raw;
+      if (chunk.length > 60000) {
+        chunk = chunk.slice(-60000);
+      }
+      const wrapped = `# file: ${rel}\n${chunk}\n`;
+      blocks.push(wrapped);
+      total += wrapped.length;
+      if (total >= maxChars) break;
+    } catch {
+      // best-effort only
+    }
+  }
+  const merged = blocks.join('\n\n---\n\n').trim();
+  if (!merged) return '';
+  if (merged.length <= maxChars) return merged;
+  return merged.slice(-maxChars);
+}
+
+function buildPrompt(payload: SwarmsPayload): string {
+  const instruction = (payload.execution_prompt || '').trim();
+  const taskFolder = safeTaskDir(payload.task?.id || 'task');
+  const activeTaskDir = `/workspace/group/workspace/tasks/${taskFolder}`;
+  const taskHint = [
+    'Use this workspace:',
+    '- Shared guidance:',
+    '  - /workspace/group/workspace/INSTRUCTION.md',
+    '  - /workspace/group/workspace/INSIGHTS.md',
+    `- Active task workspace: ${activeTaskDir}`,
+    `  - ${activeTaskDir}/TASK.md`,
+    `  - ${activeTaskDir}/repo`,
+    'Only edit files under the active task repo path.',
+  ].join('\n');
+  return `${instruction}\n\n${taskHint}\n`;
+}
 
 async function main(): Promise<void> {
   const payloadPath = process.argv[2];
   if (!payloadPath) {
-    process.stderr.write('usage: task-runner.ts <payload.json>\n');
-    process.exit(2);
+    die('usage: tsx src/bench/task-runner.ts <payload.json>');
+  }
+  if (!fs.existsSync(payloadPath)) {
+    die(`payload not found: ${payloadPath}`);
   }
 
-  let payload: TaskPayload;
-  try {
-    const raw = fs.readFileSync(payloadPath, 'utf-8');
-    payload = JSON.parse(raw) as TaskPayload;
-  } catch (err) {
-    process.stderr.write(`Failed to read payload: ${err}\n`);
-    process.exit(2);
+  const payload = readJsonFile<SwarmsPayload>(payloadPath);
+  const scope: RuntimeScope = payload.runtime?.session_scope === 'agent' ? 'agent' : 'task';
+  const wipeWorkspacePerTask = payload.runtime?.wipe_workspace_per_task !== false;
+  const groupFolder = toGroupFolder(payload, scope);
+
+  seedWorkspace(payload, groupFolder, wipeWorkspacePerTask);
+
+  let sessionId: string | undefined;
+  if (scope === 'agent') {
+    sessionId = loadSessionForAgent(payload.agent_id);
   }
 
-  const {
-    generation,
-    agent_id,
-    task,
-    workspace_seed,
-    execution_prompt,
-    runtime,
-  } = payload;
+  const group: RegisteredGroup = {
+    name: `swarms-${payload.agent_id}`,
+    folder: groupFolder,
+    trigger: '@Swarms',
+    added_at: new Date().toISOString(),
+    requiresTrigger: false,
+  };
 
-  // Unique folder per task execution (prevents cross-contamination)
-  const uid = randomUUID().slice(0, 8);
-  const groupFolder = `bench-${safeSlug(agent_id)}-${safeSlug(task.id)}-${uid}`;
-  const chatJid = `bench-task@swarms.local`;
+  const outputs: string[] = [];
+  let latestSessionId: string | undefined = sessionId;
+  let closeScheduled = false;
 
-  try {
-    // 1. Write workspace seed files
-    writeWorkspace(groupFolder, workspace_seed);
+  const result = await runContainerAgent(
+    group,
+    {
+      prompt: buildPrompt(payload),
+      sessionId,
+      groupFolder,
+      chatJid: `swarm-${payload.agent_id}`,
+      isMain: false,
+      isScheduledTask: false,
+      assistantName: 'Swarms',
+    },
+    () => {},
+    async (streamed) => {
+      if (streamed.newSessionId) {
+        latestSessionId = streamed.newSessionId;
+      }
+      if (streamed.result) {
+        outputs.push(streamed.result);
+        if (!closeScheduled) {
+          closeScheduled = true;
+          setTimeout(() => {
+            try {
+              closeSentinel(groupFolder);
+            } catch {
+              // best-effort close signal
+            }
+          }, 1000);
+        }
+      }
+    },
+  );
 
-    // 2. Build group and container input
-    const group: RegisteredGroup = {
-      name: `bench/${agent_id}/${task.id}`,
-      folder: groupFolder,
-      trigger: '',
-      added_at: new Date().toISOString(),
-      requiresTrigger: false,
-    };
+  if (result.status !== 'success') {
+    die(result.error || 'container run failed');
+  }
 
-    const secrets: Record<string, string> = {};
-    if (process.env.ANTHROPIC_API_KEY)
-      secrets.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    if (process.env.CLAUDE_CODE_OAUTH_TOKEN)
-      secrets.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    if (process.env.LLM_API_KEY && !secrets.ANTHROPIC_API_KEY)
-      secrets.ANTHROPIC_API_KEY = process.env.LLM_API_KEY;
+  if (!latestSessionId && result.newSessionId) {
+    latestSessionId = result.newSessionId;
+  }
+  if (scope === 'agent' && latestSessionId) {
+    saveSessionForAgent(payload.agent_id, latestSessionId);
+  }
 
-    // 3. Run the container agent (single-shot via isScheduledTask)
-    // Pass onOutput so the streaming parser catches OUTPUT markers in
-    // real-time.  Without it, the container-runner skips marker parsing
-    // and relies on the legacy parser, which only runs on clean exit.
-    // If the SDK's query() generator hangs after the result, the
-    // container times out and the output is lost.
-    let lastOutput: ContainerOutput | undefined;
-    const containerOutput = await runContainerAgent(
-      group,
+  const merged = outputs.join('\n\n').trim() || (result.result || '');
+  const meta = {
+    generation: payload.generation,
+    agent_id: payload.agent_id,
+    task_id: payload.task?.id || '',
+    group_folder: groupFolder,
+    session_scope: scope,
+    session_id: latestSessionId || '',
+    active_task_dir: `/workspace/group/workspace/tasks/${safeTaskDir(payload.task?.id || 'task')}`,
+    model_requested: process.env.LLM_MODEL || '',
+    native_session_memory: collectNativeSessionMemory(groupFolder),
+  };
+
+  process.stdout.write(
+    JSON.stringify(
       {
-        prompt: execution_prompt,
-        groupFolder,
-        chatJid,
-        isMain: false,
-        isScheduledTask: true,
-        secrets,
+        result: merged,
+        tool_trace: [],
+        meta,
       },
-      (_proc, _name) => {
-        /* no-op process callback */
-      },
-      async (output) => {
-        lastOutput = output;
-      },
-    );
-
-    // 4. Emit result JSON to stdout
-    // In streaming mode, runContainerAgent returns a completion marker
-    // { status: 'success', result: null }.  The actual result text was
-    // captured by the onOutput callback in lastOutput.  Prefer it.
-    const effectiveOutput =
-      lastOutput?.result != null ? lastOutput : containerOutput;
-    const output = {
-      result: effectiveOutput.result ?? effectiveOutput.error ?? '',
-      tool_trace:
-        (effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? [],
-      meta: {
-        generation,
-        agent_id,
-        task_id: task.id,
-        status: effectiveOutput.status,
-        session_scope: runtime.session_scope,
-        input_tokens: effectiveOutput.input_tokens ?? 0,
-        output_tokens: effectiveOutput.output_tokens ?? 0,
-      },
-    };
-    process.stdout.write(JSON.stringify(output) + '\n');
-  } finally {
-    // 5. Always clean up the ephemeral group folder
-    if (runtime.wipe_workspace_per_task) {
-      cleanupGroup(groupFolder);
-    }
-  }
+      null,
+      0,
+    ) + '\n',
+  );
 }
 
 main().catch((err) => {
-  process.stderr.write(`task-runner fatal error: ${err}\n`);
+  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
   process.exit(1);
 });
