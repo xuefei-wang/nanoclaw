@@ -456,7 +456,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__memory__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -472,6 +473,15 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(fs.existsSync('/app/memory/mcp_server.py') ? {
+          memory: {
+            command: 'python3',
+            args: ['/app/memory/mcp_server.py'],
+            env: {
+              MEMORY_DB_PATH: '/app/memory/memory.sqlite',
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],

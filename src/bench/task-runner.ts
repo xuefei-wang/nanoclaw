@@ -17,7 +17,6 @@ interface RuntimeConfig {
 interface WorkspaceSeed {
   instruction_md?: string;
   insights_md?: string;
-  memory_md?: string;
   task_md?: string;
   repo_source_path?: string;
 }
@@ -29,6 +28,11 @@ interface TaskPayload {
   metadata?: Record<string, unknown>;
 }
 
+interface MemoryConfig {
+  db_path?: string;
+  mcp_server_dir?: string;
+}
+
 interface SwarmsPayload {
   generation: number;
   agent_id: string;
@@ -36,6 +40,7 @@ interface SwarmsPayload {
   workspace_seed?: WorkspaceSeed;
   execution_prompt?: string;
   runtime?: RuntimeConfig;
+  memory?: MemoryConfig;
 }
 
 interface SessionState {
@@ -112,11 +117,9 @@ function seedWorkspace(
   const seed = payload.workspace_seed || {};
   const instruction = (seed.instruction_md || '').trim() + '\n';
   const insights = (seed.insights_md || '').trim() + '\n';
-  const memory = (seed.memory_md || '').trim() + '\n';
   const taskMd = (seed.task_md || '').trim() + '\n';
 
   writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
-  writeText(path.join(workspaceRoot, 'MEMORY.md'), memory);
   writeText(path.join(workspaceRoot, 'INSIGHTS.md'), insights);
   const tasksRoot = path.join(workspaceRoot, 'tasks');
   ensureDir(tasksRoot);
@@ -343,6 +346,7 @@ async function main(): Promise<void> {
         group_folder: groupFolder,
         session_id: latestSessionId || '',
         active_task_dir: `/workspace/group/workspace/tasks/${safeTaskDir(payload.task?.id || 'task')}`,
+        memory_db_path: payload.memory?.db_path || '',
         model_requested: process.env.MODEL || '',
         native_session_memory: collectNativeSessionMemory(groupFolder),
       },
