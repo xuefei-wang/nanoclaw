@@ -288,12 +288,37 @@ async function main(): Promise<void> {
     sessionId = loadSessionForAgent(payload.agent_id);
   }
 
+  // Set up memory mounts if memory DB path is configured
+  const memoryDbPath = payload.memory?.db_path || '';
+  const mcpServerDir = payload.memory?.mcp_server_dir || '';
+
+  const additionalMounts: Array<{hostPath: string; containerPath: string; readonly: boolean}> = [];
+  if (memoryDbPath) {
+    // Mount the directory containing the SQLite DB (SQLite needs WAL/SHM files too)
+    const dbDir = path.dirname(path.resolve(memoryDbPath));
+    if (fs.existsSync(dbDir)) {
+      additionalMounts.push({
+        hostPath: dbDir,
+        containerPath: '/app/memory-db',
+        readonly: false,  // Forum debate needs write access
+      });
+    }
+  }
+  if (mcpServerDir && fs.existsSync(mcpServerDir)) {
+    additionalMounts.push({
+      hostPath: path.resolve(mcpServerDir),
+      containerPath: '/app/memory',
+      readonly: true,
+    });
+  }
+
   const group: RegisteredGroup = {
     name: `swarms-${payload.agent_id}`,
     folder: groupFolder,
     trigger: '@Swarms',
     added_at: new Date().toISOString(),
     requiresTrigger: false,
+    containerConfig: additionalMounts.length > 0 ? { additionalMounts } : undefined,
   };
 
   try {
@@ -310,6 +335,7 @@ async function main(): Promise<void> {
         isMain: false,
         isScheduledTask: true,
         assistantName: 'Swarms',
+        metadata: payload.task?.metadata || {},
       },
       () => {},
       async (streamed) => {
