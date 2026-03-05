@@ -423,8 +423,10 @@ export async function runContainerAgent(
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
       }
-      // Don't reset timeout on stderr — SDK writes debug logs continuously.
-      // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
+      // Activity detected on stderr — reset the timeout so active work
+      // (tool calls, test runs) extends the container's life, capped by
+      // the absolute deadline set at container start.
+      resetTimeout();
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
       if (chunk.length > remaining) {
@@ -446,6 +448,9 @@ export async function runContainerAgent(
     // graceful _close sentinel has time to trigger before the hard kill fires.
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
+    // Absolute deadline: no reset can extend beyond this point
+    const absoluteDeadline = Date.now() + timeoutMs;
+
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
@@ -465,10 +470,16 @@ export async function runContainerAgent(
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
 
-    // Reset the timeout whenever there's activity (streaming output)
+    // Reset the timeout whenever there's activity (streaming output or stderr),
+    // but never extend beyond the absolute deadline.
     const resetTimeout = () => {
       clearTimeout(timeout);
-      timeout = setTimeout(killOnTimeout, timeoutMs);
+      const remaining = absoluteDeadline - Date.now();
+      if (remaining <= 0) {
+        killOnTimeout();
+        return;
+      }
+      timeout = setTimeout(killOnTimeout, Math.min(timeoutMs, remaining));
     };
 
     container.on('close', (code) => {

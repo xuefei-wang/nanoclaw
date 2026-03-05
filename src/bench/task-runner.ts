@@ -225,7 +225,7 @@ function collectNativeSessionMemory(
 
   const blocks: string[] = [];
   let total = 0;
-  for (const f of files.slice(0, 8)) {
+  for (const f of files) {
     try {
       const raw = fs.readFileSync(f, 'utf-8');
       if (!raw.trim()) continue;

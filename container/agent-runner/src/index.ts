@@ -562,7 +562,7 @@ async function runQuery(
       record.result_excerpt = maybeResult.slice(0, 240);
     }
     toolTrace.push(record);
-    if (toolTrace.length > 500) toolTrace.shift();
+    if (toolTrace.length > 2000) toolTrace.shift();
 
     // Accumulate token usage from SDK messages
     const msgAny = message as Record<string, unknown>;
@@ -582,7 +582,7 @@ async function runQuery(
       const assistantText = extractAssistantText(message);
       lastAssistantFallback = assistantText || (() => {
         try {
-          return JSON.stringify(message).slice(0, 4000);
+          return JSON.stringify(message).slice(0, 50000);
         } catch {
           return '[assistant_message_without_text]';
         }
@@ -607,7 +607,7 @@ async function runQuery(
         status: 'success',
         result: textResult || null,
         newSessionId,
-        toolTrace: toolTrace.slice(-200),
+        toolTrace: toolTrace.slice(-1000),
         input_tokens: totalInputTokens,
         output_tokens: totalOutputTokens,
         cache_creation_input_tokens: totalCacheCreationTokens,
@@ -630,7 +630,7 @@ async function runQuery(
       status: 'success',
       result: lastAssistantFallback,
       newSessionId,
-      toolTrace: toolTrace.slice(-200),
+      toolTrace: toolTrace.slice(-1000),
       input_tokens: totalInputTokens,
       output_tokens: totalOutputTokens,
       cache_creation_input_tokens: totalCacheCreationTokens,
