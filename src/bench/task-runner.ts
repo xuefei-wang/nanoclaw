@@ -302,6 +302,10 @@ async function main(): Promise<void> {
         containerPath: '/app/memory-db',
         readonly: false,  // Forum debate needs write access
       });
+      // Set the container-side path so findMemoryDb() picks the correct file
+      // when multiple .sqlite files exist in the same directory.
+      const dbFilename = path.basename(path.resolve(memoryDbPath));
+      process.env.MEMORY_DB_PATH = `/app/memory-db/${dbFilename}`;
     }
   }
   if (mcpServerDir && fs.existsSync(mcpServerDir)) {

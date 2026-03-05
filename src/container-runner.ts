@@ -253,9 +253,9 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
-  // Forward explicit provider/model/auth selection into the container so the SDK
-  // does not silently fall back to ambient/default model resolution.
-  for (const key of ['MODEL_PROVIDER', 'MODEL', 'MODEL_AUTH_MODE']) {
+  // Forward explicit provider/model/auth selection and memory DB path into the
+  // container so the SDK and MCP server resolve correctly.
+  for (const key of ['MODEL_PROVIDER', 'MODEL', 'MODEL_AUTH_MODE', 'MEMORY_DB_PATH']) {
     const value = process.env[key];
     if (value && value.trim()) {
       args.push('-e', `${key}=${value}`);
