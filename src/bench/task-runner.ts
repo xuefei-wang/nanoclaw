@@ -17,7 +17,6 @@ interface RuntimeConfig {
 interface WorkspaceSeed {
   instruction_md?: string;
   insights_md?: string;
-  memory_md?: string;
   task_md?: string;
   repo_source_path?: string;
 }
@@ -29,6 +28,11 @@ interface TaskPayload {
   metadata?: Record<string, unknown>;
 }
 
+interface MemoryConfig {
+  db_path?: string;
+  mcp_server_dir?: string;
+}
+
 interface SwarmsPayload {
   generation: number;
   agent_id: string;
@@ -36,6 +40,7 @@ interface SwarmsPayload {
   workspace_seed?: WorkspaceSeed;
   execution_prompt?: string;
   runtime?: RuntimeConfig;
+  memory?: MemoryConfig;
 }
 
 interface SessionState {
@@ -112,11 +117,9 @@ function seedWorkspace(
   const seed = payload.workspace_seed || {};
   const instruction = (seed.instruction_md || '').trim() + '\n';
   const insights = (seed.insights_md || '').trim() + '\n';
-  const memory = (seed.memory_md || '').trim() + '\n';
   const taskMd = (seed.task_md || '').trim() + '\n';
 
   writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
-  writeText(path.join(workspaceRoot, 'MEMORY.md'), memory);
   writeText(path.join(workspaceRoot, 'INSIGHTS.md'), insights);
   const tasksRoot = path.join(workspaceRoot, 'tasks');
   ensureDir(tasksRoot);
@@ -285,12 +288,37 @@ async function main(): Promise<void> {
     sessionId = loadSessionForAgent(payload.agent_id);
   }
 
+  // Set up memory mounts if memory DB path is configured
+  const memoryDbPath = payload.memory?.db_path || '';
+  const mcpServerDir = payload.memory?.mcp_server_dir || '';
+
+  const additionalMounts: Array<{hostPath: string; containerPath: string; readonly: boolean}> = [];
+  if (memoryDbPath) {
+    // Mount the directory containing the SQLite DB (SQLite needs WAL/SHM files too)
+    const dbDir = path.dirname(path.resolve(memoryDbPath));
+    if (fs.existsSync(dbDir)) {
+      additionalMounts.push({
+        hostPath: dbDir,
+        containerPath: '/app/memory-db',
+        readonly: false,  // Forum debate needs write access
+      });
+    }
+  }
+  if (mcpServerDir && fs.existsSync(mcpServerDir)) {
+    additionalMounts.push({
+      hostPath: path.resolve(mcpServerDir),
+      containerPath: '/app/memory',
+      readonly: true,
+    });
+  }
+
   const group: RegisteredGroup = {
     name: `swarms-${payload.agent_id}`,
     folder: groupFolder,
     trigger: '@Swarms',
     added_at: new Date().toISOString(),
     requiresTrigger: false,
+    containerConfig: additionalMounts.length > 0 ? { additionalMounts } : undefined,
   };
 
   try {
@@ -307,6 +335,7 @@ async function main(): Promise<void> {
         isMain: false,
         isScheduledTask: true,
         assistantName: 'Swarms',
+        metadata: payload.task?.metadata || {},
       },
       () => {},
       async (streamed) => {
@@ -343,6 +372,7 @@ async function main(): Promise<void> {
         group_folder: groupFolder,
         session_id: latestSessionId || '',
         active_task_dir: `/workspace/group/workspace/tasks/${safeTaskDir(payload.task?.id || 'task')}`,
+        memory_db_path: payload.memory?.db_path || '',
         model_requested: process.env.MODEL || '',
         native_session_memory: collectNativeSessionMemory(groupFolder),
       },
