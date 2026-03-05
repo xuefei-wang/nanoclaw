@@ -39,6 +39,8 @@ interface ContainerOutput {
   toolTrace?: Array<Record<string, unknown>>;
   input_tokens?: number;
   output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
 }
 
 interface SessionEntry {
@@ -62,6 +64,42 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+const MEMORY_MCP_SCRIPT = '/app/memory/mcp_server.py';
+const MEMORY_DB_MOUNT_DIR = '/app/memory-db';
+const MEMORY_DB_CANDIDATES = [
+  '/workspace/memory/memory.sqlite',
+  '/workspace/memory.sqlite',
+  '/app/memory/memory.sqlite',
+];
+
+/**
+ * Locate the memory SQLite DB by checking known candidate paths.
+ * Returns the first path that exists on disk, or null if none found.
+ *
+ * Priority:
+ * 1. MEMORY_DB_PATH env var (set by orchestrator payload)
+ * 2. Directory mount at /app/memory-db/ (supports WAL mode)
+ * 3. Fixed candidate paths
+ */
+function findMemoryDb(): string | null {
+  // Check MEMORY_DB_PATH env var first (set by orchestrator payload)
+  const envPath = process.env.MEMORY_DB_PATH;
+  if (envPath && fs.existsSync(envPath)) return envPath;
+
+  // Prefer mounted DB directory (supports WAL mode with directory mount)
+  if (fs.existsSync(MEMORY_DB_MOUNT_DIR)) {
+    try {
+      const files = fs.readdirSync(MEMORY_DB_MOUNT_DIR).filter((f: string) => f.endsWith('.sqlite'));
+      if (files.length > 0) return path.join(MEMORY_DB_MOUNT_DIR, files[0]);
+    } catch { /* fall through */ }
+  }
+
+  for (const candidate of MEMORY_DB_CANDIDATES) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -410,6 +448,8 @@ async function runQuery(
   const toolTrace: Array<Record<string, unknown>> = [];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let totalCacheCreationTokens = 0;
+  let totalCacheReadTokens = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -433,6 +473,38 @@ async function runQuery(
   if (extraDirs.length > 0) {
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
+
+  // Build MCP servers config — always include nanoclaw, conditionally add memory
+  const mcpServersConfig: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      },
+    },
+  };
+
+  // Only register memory MCP server when both the script and DB file exist
+  const memoryDbPath = findMemoryDb();
+  if (memoryDbPath && fs.existsSync(MEMORY_MCP_SCRIPT)) {
+    log(`Memory MCP server enabled: db=${memoryDbPath}`);
+    mcpServersConfig.memory = {
+      command: 'python3',
+      args: [MEMORY_MCP_SCRIPT],
+      env: {
+        MEMORY_DB_PATH: memoryDbPath,
+        FORUM_GENERATION: String(containerInput.metadata?.forum_generation || '0'),
+        FORUM_AGENT_ID: String(containerInput.metadata?.forum_agent_id || ''),
+        FORUM_EXPECTED_AGENTS: String(containerInput.metadata?.forum_expected_agents || '0'),
+      },
+    };
+  } else {
+    log(`Memory MCP server skipped: script=${fs.existsSync(MEMORY_MCP_SCRIPT)}, db=${memoryDbPath || 'not found'}`);
+  }
+
   const selectedModel = sdkEnv.MODEL;
   if (selectedModel) {
     log(`Using model: ${selectedModel}`);
@@ -458,45 +530,13 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__memory__*'
+        ...(memoryDbPath ? ['mcp__memory__*'] : []),
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
-        ...(fs.existsSync('/app/memory/mcp_server.py') ? {
-          memory: {
-            command: 'python3',
-            args: ['/app/memory/mcp_server.py'],
-            env: {
-              MEMORY_DB_PATH: (() => {
-                // Prefer mounted DB directory (supports WAL mode with directory mount)
-                const mountedDir = '/app/memory-db';
-                if (fs.existsSync(mountedDir)) {
-                  try {
-                    const files = fs.readdirSync(mountedDir).filter((f: string) => f.endsWith('.sqlite'));
-                    if (files.length > 0) return path.join(mountedDir, files[0]);
-                  } catch { /* fall through */ }
-                }
-                return '/app/memory/memory.sqlite';
-              })(),
-              FORUM_GENERATION: String(containerInput.metadata?.forum_generation || '0'),
-              FORUM_AGENT_ID: String(containerInput.metadata?.forum_agent_id || ''),
-              FORUM_EXPECTED_AGENTS: String(containerInput.metadata?.forum_expected_agents || '0'),
-            },
-          },
-        } : {}),
-      },
+      mcpServers: mcpServersConfig,
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
@@ -528,9 +568,9 @@ async function runQuery(
     const msgAny = message as Record<string, unknown>;
     if (msgAny.usage && typeof msgAny.usage === 'object') {
       const usage = msgAny.usage as Record<string, number>;
-      totalInputTokens += (usage.input_tokens || 0)
-        + (usage.cache_creation_input_tokens || 0)
-        + (usage.cache_read_input_tokens || 0);
+      totalInputTokens += (usage.input_tokens || 0);
+      totalCacheCreationTokens += (usage.cache_creation_input_tokens || 0);
+      totalCacheReadTokens += (usage.cache_read_input_tokens || 0);
       totalOutputTokens += usage.output_tokens || 0;
     }
 
@@ -570,6 +610,8 @@ async function runQuery(
         toolTrace: toolTrace.slice(-200),
         input_tokens: totalInputTokens,
         output_tokens: totalOutputTokens,
+        cache_creation_input_tokens: totalCacheCreationTokens,
+        cache_read_input_tokens: totalCacheReadTokens,
       });
       // Scheduled/bench tasks are single-shot: break immediately after
       // emitting the result so we don't block waiting for the SDK generator
@@ -591,6 +633,8 @@ async function runQuery(
       toolTrace: toolTrace.slice(-200),
       input_tokens: totalInputTokens,
       output_tokens: totalOutputTokens,
+      cache_creation_input_tokens: totalCacheCreationTokens,
+      cache_read_input_tokens: totalCacheReadTokens,
     });
   }
 
