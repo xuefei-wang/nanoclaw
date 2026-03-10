@@ -40,7 +40,11 @@ interface SwarmsPayload {
   workspace_seed?: WorkspaceSeed;
   execution_prompt?: string;
   runtime?: RuntimeConfig;
-  memory?: MemoryConfig;
+  experiment_name?: string;
+  memory?: {
+    db_path: string;
+    mcp_server_dir: string;
+  };
 }
 
 interface SessionState {
@@ -329,6 +333,16 @@ async function main(): Promise<void> {
     let lastOutput: ContainerOutput | undefined;
     let latestSessionId: string | undefined = sessionId;
 
+    // Build memory MCP config from payload if present.
+    const memoryMcp = payload.memory ? {
+      dbPath: payload.memory.db_path,
+      serverDir: payload.memory.mcp_server_dir,
+      forumGeneration: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_generation as number | undefined,
+      forumAgentId: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_agent_id as string | undefined,
+      forumExpectedAgents: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_expected_agents as number | undefined,
+      experiment: payload.experiment_name,
+    } : undefined;
+
     const result = await runContainerAgent(
       group,
       {
@@ -339,7 +353,7 @@ async function main(): Promise<void> {
         isMain: false,
         isScheduledTask: true,
         assistantName: 'Swarms',
-        metadata: payload.task?.metadata || {},
+        memoryMcp,
       },
       () => {},
       async (streamed) => {

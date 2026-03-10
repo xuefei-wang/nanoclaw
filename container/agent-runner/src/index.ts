@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -28,7 +28,15 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
-  metadata?: Record<string, unknown>;
+  /** Memory MCP server config — register memory tools when present. */
+  memoryMcp?: {
+    dbPath: string;
+    serverDir: string;
+    forumGeneration?: number;
+    forumAgentId?: string;
+    forumExpectedAgents?: number;
+    experiment?: string;
+  };
 }
 
 interface ContainerOutput {
@@ -510,6 +518,50 @@ async function runQuery(
     log(`Using model: ${selectedModel}`);
   }
 
+  // Build allowed tools list — conditionally include memory MCP tools.
+  const allowedToolsList: string[] = [
+    'Bash',
+    'Read', 'Write', 'Edit', 'Glob', 'Grep',
+    'WebSearch', 'WebFetch',
+    'Task', 'TaskOutput', 'TaskStop',
+    'TeamCreate', 'TeamDelete', 'SendMessage',
+    'TodoWrite', 'ToolSearch', 'Skill',
+    'NotebookEdit',
+    'mcp__nanoclaw__*',
+  ];
+
+  // Build MCP server config — conditionally add memory server.
+  const mcpServerConfig: Record<string, McpServerConfig> = {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      },
+    },
+  };
+
+  // Register memory MCP server when config is present and server file exists.
+  if (containerInput.memoryMcp && fs.existsSync('/app/memory/mcp_server.py')) {
+    const dbFile = path.basename(containerInput.memoryMcp.dbPath);
+    mcpServerConfig.memory = {
+      command: 'python3',
+      args: ['/app/memory/mcp_server.py'],
+      env: {
+        MEMORY_DB_PATH: `/app/memory-db/${dbFile}`,
+        MEMORY_SEARCH_MODE: 'fts',
+        FORUM_GENERATION: String(containerInput.memoryMcp.forumGeneration ?? 0),
+        FORUM_AGENT_ID: containerInput.memoryMcp.forumAgentId ?? '',
+        FORUM_EXPECTED_AGENTS: String(containerInput.memoryMcp.forumExpectedAgents ?? 0),
+        MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
+      },
+    };
+    allowedToolsList.push('mcp__memory__*');
+    log('Memory MCP server registered');
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -521,22 +573,12 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-        ...(memoryDbPath ? ['mcp__memory__*'] : []),
-      ],
+      allowedTools: allowedToolsList,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: mcpServersConfig,
+      mcpServers: mcpServerConfig,
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
