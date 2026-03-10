@@ -39,6 +39,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ContainerOutput {
@@ -188,14 +189,38 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Additional mounts validated against external allowlist (tamper-proof from containers)
+  // Additional mounts: absolute containerPath mounts are direct (trusted, set by
+  // bench task-runner code), relative/unset containerPath mounts go through
+  // external allowlist validation (tamper-proof from containers).
   if (group.containerConfig?.additionalMounts) {
-    const validatedMounts = validateAdditionalMounts(
-      group.containerConfig.additionalMounts,
-      group.name,
-      isMain,
-    );
-    mounts.push(...validatedMounts);
+    const relativeMounts = [];
+    for (const mount of group.containerConfig.additionalMounts) {
+      if (mount.containerPath && mount.containerPath.startsWith('/')) {
+        // Absolute container path — direct mount from trusted task-runner
+        const expandedHost = path.resolve(
+          mount.hostPath.startsWith('~')
+            ? mount.hostPath.replace('~', process.env.HOME || '')
+            : mount.hostPath,
+        );
+        if (fs.existsSync(expandedHost)) {
+          mounts.push({
+            hostPath: expandedHost,
+            containerPath: mount.containerPath,
+            readonly: mount.readonly !== false,
+          });
+        }
+      } else {
+        relativeMounts.push(mount);
+      }
+    }
+    if (relativeMounts.length > 0) {
+      const validatedMounts = validateAdditionalMounts(
+        relativeMounts,
+        group.name,
+        isMain,
+      );
+      mounts.push(...validatedMounts);
+    }
   }
 
   return mounts;

@@ -28,6 +28,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  metadata?: Record<string, unknown>;
 }
 
 interface ContainerOutput {
@@ -456,7 +457,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__memory__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -472,6 +474,28 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(fs.existsSync('/app/memory/mcp_server.py') ? {
+          memory: {
+            command: 'python3',
+            args: ['/app/memory/mcp_server.py'],
+            env: {
+              MEMORY_DB_PATH: (() => {
+                // Prefer mounted DB directory (supports WAL mode with directory mount)
+                const mountedDir = '/app/memory-db';
+                if (fs.existsSync(mountedDir)) {
+                  try {
+                    const files = fs.readdirSync(mountedDir).filter((f: string) => f.endsWith('.sqlite'));
+                    if (files.length > 0) return path.join(mountedDir, files[0]);
+                  } catch { /* fall through */ }
+                }
+                return '/app/memory/memory.sqlite';
+              })(),
+              FORUM_GENERATION: String(containerInput.metadata?.forum_generation || '0'),
+              FORUM_AGENT_ID: String(containerInput.metadata?.forum_agent_id || ''),
+              FORUM_EXPECTED_AGENTS: String(containerInput.metadata?.forum_expected_agents || '0'),
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
