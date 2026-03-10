@@ -308,20 +308,37 @@ export async function runContainerAgent(
 
   // Mount memory DB directory and MCP server code when memory is configured.
   if (input.memoryMcp) {
-    const dbDir = path.dirname(input.memoryMcp.dbPath);
-    if (fs.existsSync(dbDir)) {
-      mounts.push({
-        hostPath: dbDir,
-        containerPath: '/app/memory-db',
-        readonly: false,
-      });
-    }
-    if (fs.existsSync(input.memoryMcp.serverDir)) {
-      mounts.push({
-        hostPath: input.memoryMcp.serverDir,
-        containerPath: '/app/memory',
-        readonly: true,
-      });
+    if (!path.isAbsolute(input.memoryMcp.dbPath)) {
+      logger.warn(
+        { group: group.name, dbPath: input.memoryMcp.dbPath },
+        'memoryMcp.dbPath is not absolute — skipping memory mounts to avoid resolving against wrong cwd',
+      );
+    } else {
+      const dbDir = path.dirname(input.memoryMcp.dbPath);
+      if (fs.existsSync(dbDir)) {
+        mounts.push({
+          hostPath: dbDir,
+          containerPath: '/app/memory-db',
+          readonly: false,
+        });
+      } else {
+        logger.warn(
+          { group: group.name, dbDir },
+          'Memory DB directory does not exist — memory MCP will not be available',
+        );
+      }
+      if (fs.existsSync(input.memoryMcp.serverDir)) {
+        mounts.push({
+          hostPath: input.memoryMcp.serverDir,
+          containerPath: '/app/memory',
+          readonly: true,
+        });
+      } else {
+        logger.warn(
+          { group: group.name, serverDir: input.memoryMcp.serverDir },
+          'Memory MCP server directory does not exist — memory MCP will not be available',
+        );
+      }
     }
   }
 
