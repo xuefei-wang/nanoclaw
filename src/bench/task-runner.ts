@@ -16,7 +16,7 @@ interface RuntimeConfig {
 
 interface WorkspaceSeed {
   instruction_md?: string;
-  insights_md?: string;
+  memory_md?: string;
   task_md?: string;
   repo_source_path?: string;
 }
@@ -120,11 +120,11 @@ function seedWorkspace(
 
   const seed = payload.workspace_seed || {};
   const instruction = (seed.instruction_md || '').trim() + '\n';
-  const insights = (seed.insights_md || '').trim() + '\n';
+  const memory = (seed.memory_md || '').trim() + '\n';
   const taskMd = (seed.task_md || '').trim() + '\n';
 
   writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
-  writeText(path.join(workspaceRoot, 'INSIGHTS.md'), insights);
+  writeText(path.join(workspaceRoot, 'MEMORY.md'), memory);
   const tasksRoot = path.join(workspaceRoot, 'tasks');
   ensureDir(tasksRoot);
 
@@ -260,7 +260,7 @@ function buildPrompt(payload: SwarmsPayload): string {
     'Use this workspace:',
     '- Shared guidance:',
     '  - /workspace/group/workspace/INSTRUCTION.md',
-    '  - /workspace/group/workspace/INSIGHTS.md',
+    '  - /workspace/group/workspace/MEMORY.md (seed knowledge from prior generations)',
     `- Active task workspace: ${activeTaskDir}`,
     `  - ${activeTaskDir}/TASK.md`,
     `  - ${activeTaskDir}/repo`,
