@@ -185,73 +185,6 @@ function cleanupGroup(groupFolder: string): void {
   }
 }
 
-function listFilesRecursive(root: string): string[] {
-  if (!fs.existsSync(root)) return [];
-  const out: string[] = [];
-  const stack = [root];
-  while (stack.length > 0) {
-    const cur = stack.pop() as string;
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(cur, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      const p = path.join(cur, e.name);
-      if (e.isDirectory()) {
-        stack.push(p);
-      } else if (e.isFile()) {
-        out.push(p);
-      }
-    }
-  }
-  return out;
-}
-
-function collectNativeSessionMemory(
-  groupFolder: string,
-  maxChars = 240000,
-): string {
-  const claudeRoot = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
-  const files = listFilesRecursive(claudeRoot).filter(
-    (p) => p.endsWith('.jsonl') || p.endsWith('.md') || p.endsWith('.txt'),
-  );
-  if (files.length === 0) return '';
-
-  files.sort((a, b) => {
-    try {
-      return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
-    } catch {
-      return 0;
-    }
-  });
-
-  const blocks: string[] = [];
-  let total = 0;
-  for (const f of files) {
-    try {
-      const raw = fs.readFileSync(f, 'utf-8');
-      if (!raw.trim()) continue;
-      const rel = path.relative(claudeRoot, f);
-      let chunk = raw;
-      if (chunk.length > 60000) {
-        chunk = chunk.slice(-60000);
-      }
-      const wrapped = `# file: ${rel}\n${chunk}\n`;
-      blocks.push(wrapped);
-      total += wrapped.length;
-      if (total >= maxChars) break;
-    } catch {
-      // best-effort only
-    }
-  }
-  const merged = blocks.join('\n\n---\n\n').trim();
-  if (!merged) return '';
-  if (merged.length <= maxChars) return merged;
-  return merged.slice(-maxChars);
-}
-
 function buildPrompt(payload: SwarmsPayload): string {
   const instruction = (payload.execution_prompt || '').trim();
   const taskFolder = safeTaskDir(payload.task?.id || 'task');
@@ -392,7 +325,7 @@ async function main(): Promise<void> {
         active_task_dir: `/workspace/group/workspace/tasks/${safeTaskDir(payload.task?.id || 'task')}`,
         memory_db_path: payload.memory?.db_path || '',
         model_requested: process.env.MODEL || '',
-        native_session_memory: collectNativeSessionMemory(groupFolder),
+        native_session_memory: '',
       },
     };
     process.stdout.write(JSON.stringify(output) + '\n');
