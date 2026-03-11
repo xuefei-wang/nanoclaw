@@ -39,7 +39,15 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
-  metadata?: Record<string, unknown>;
+  /** Memory MCP server config — when set, mounts DB + server into container. */
+  memoryMcp?: {
+    dbPath: string;
+    serverDir: string;
+    forumGeneration?: number;
+    forumAgentId?: string;
+    forumExpectedAgents?: number;
+    experiment?: string;
+  };
 }
 
 export interface ContainerOutput {
@@ -297,6 +305,43 @@ export async function runContainerAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain);
+
+  // Mount memory DB directory and MCP server code when memory is configured.
+  if (input.memoryMcp) {
+    if (!path.isAbsolute(input.memoryMcp.dbPath)) {
+      logger.warn(
+        { group: group.name, dbPath: input.memoryMcp.dbPath },
+        'memoryMcp.dbPath is not absolute — skipping memory mounts to avoid resolving against wrong cwd',
+      );
+    } else {
+      const dbDir = path.dirname(input.memoryMcp.dbPath);
+      if (fs.existsSync(dbDir)) {
+        mounts.push({
+          hostPath: dbDir,
+          containerPath: '/app/memory-db',
+          readonly: false,
+        });
+      } else {
+        logger.warn(
+          { group: group.name, dbDir },
+          'Memory DB directory does not exist — memory MCP will not be available',
+        );
+      }
+      if (fs.existsSync(input.memoryMcp.serverDir)) {
+        mounts.push({
+          hostPath: input.memoryMcp.serverDir,
+          containerPath: '/app/memory',
+          readonly: true,
+        });
+      } else {
+        logger.warn(
+          { group: group.name, serverDir: input.memoryMcp.serverDir },
+          'Memory MCP server directory does not exist — memory MCP will not be available',
+        );
+      }
+    }
+  }
+
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);

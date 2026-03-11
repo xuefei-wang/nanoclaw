@@ -16,7 +16,7 @@ interface RuntimeConfig {
 
 interface WorkspaceSeed {
   instruction_md?: string;
-  insights_md?: string;
+  memory_md?: string;
   task_md?: string;
   repo_source_path?: string;
 }
@@ -40,7 +40,11 @@ interface SwarmsPayload {
   workspace_seed?: WorkspaceSeed;
   execution_prompt?: string;
   runtime?: RuntimeConfig;
-  memory?: MemoryConfig;
+  experiment_name?: string;
+  memory?: {
+    db_path: string;
+    mcp_server_dir: string;
+  };
 }
 
 interface SessionState {
@@ -116,11 +120,11 @@ function seedWorkspace(
 
   const seed = payload.workspace_seed || {};
   const instruction = (seed.instruction_md || '').trim() + '\n';
-  const insights = (seed.insights_md || '').trim() + '\n';
+  const memory = (seed.memory_md || '').trim() + '\n';
   const taskMd = (seed.task_md || '').trim() + '\n';
 
   writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
-  writeText(path.join(workspaceRoot, 'INSIGHTS.md'), insights);
+  writeText(path.join(workspaceRoot, 'MEMORY.md'), memory);
   const tasksRoot = path.join(workspaceRoot, 'tasks');
   ensureDir(tasksRoot);
 
@@ -256,7 +260,7 @@ function buildPrompt(payload: SwarmsPayload): string {
     'Use this workspace:',
     '- Shared guidance:',
     '  - /workspace/group/workspace/INSTRUCTION.md',
-    '  - /workspace/group/workspace/INSIGHTS.md',
+    '  - /workspace/group/workspace/MEMORY.md (seed knowledge from prior generations)',
     `- Active task workspace: ${activeTaskDir}`,
     `  - ${activeTaskDir}/TASK.md`,
     `  - ${activeTaskDir}/repo`,
@@ -329,6 +333,16 @@ async function main(): Promise<void> {
     let lastOutput: ContainerOutput | undefined;
     let latestSessionId: string | undefined = sessionId;
 
+    // Build memory MCP config from payload if present.
+    const memoryMcp = payload.memory ? {
+      dbPath: payload.memory.db_path,
+      serverDir: payload.memory.mcp_server_dir,
+      forumGeneration: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_generation as number | undefined,
+      forumAgentId: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_agent_id as string | undefined,
+      forumExpectedAgents: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_expected_agents as number | undefined,
+      experiment: payload.experiment_name,
+    } : undefined;
+
     const result = await runContainerAgent(
       group,
       {
@@ -339,7 +353,7 @@ async function main(): Promise<void> {
         isMain: false,
         isScheduledTask: true,
         assistantName: 'Swarms',
-        metadata: payload.task?.metadata || {},
+        memoryMcp,
       },
       () => {},
       async (streamed) => {
