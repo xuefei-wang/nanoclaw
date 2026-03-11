@@ -48,10 +48,11 @@ COPY agent-runner/ ./
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /app/memory-db
 
-# Create entrypoint script
+# Create entrypoint script with compile caching
+# If /tmp/dist/index.js already exists and source hasn't changed, skip recompile.
 # Secrets are passed via stdin JSON — temp file is deleted immediately after Node reads it
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+RUN printf '#!/bin/bash\nset -e\ncd /app\nSRC_HASH=$(find src -type f -name "*.ts" -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d" " -f1)\nCACHE_HASH=""\nif [ -f /tmp/dist/.src_hash ]; then\n  CACHE_HASH=$(cat /tmp/dist/.src_hash)\nfi\nif [ "$SRC_HASH" != "$CACHE_HASH" ] || [ ! -f /tmp/dist/index.js ]; then\n  npx tsc --outDir /tmp/dist 2>&1 >&2\n  echo "$SRC_HASH" > /tmp/dist/.src_hash\n  ln -sfn /app/node_modules /tmp/dist/node_modules\nfi\nchmod -R a-w /tmp/dist 2>/dev/null || true\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace /app/memory-db && chmod 777 /home/node
