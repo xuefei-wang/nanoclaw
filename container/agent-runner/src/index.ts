@@ -482,9 +482,13 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  // Build MCP servers config — always include nanoclaw, conditionally add memory
-  const mcpServersConfig: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {
-    nanoclaw: {
+  // Build MCP servers config — conditionally include nanoclaw (WhatsApp tools)
+  const mcpServersConfig: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+
+  // Only register nanoclaw MCP server (WhatsApp tools) for interactive use,
+  // not bench/scheduled tasks where send_message etc. are irrelevant.
+  if (!containerInput.isScheduledTask) {
+    mcpServersConfig.nanoclaw = {
       command: 'node',
       args: [mcpServerPath],
       env: {
@@ -492,8 +496,8 @@ async function runQuery(
         NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
         NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
       },
-    },
-  };
+    };
+  }
 
   // Only register memory MCP server when both the script and DB file exist
   const memoryDbPath = findMemoryDb();
@@ -518,7 +522,8 @@ async function runQuery(
     log(`Using model: ${selectedModel}`);
   }
 
-  // Build allowed tools list — conditionally include memory MCP tools.
+  // Build allowed tools list — conditionally include MCP tools.
+  // Skip nanoclaw (WhatsApp) tools in bench/scheduled mode where they're irrelevant.
   const allowedToolsList: string[] = [
     'Bash',
     'Read', 'Write', 'Edit', 'Glob', 'Grep',
@@ -527,12 +532,16 @@ async function runQuery(
     'TeamCreate', 'TeamDelete', 'SendMessage',
     'TodoWrite', 'ToolSearch', 'Skill',
     'NotebookEdit',
-    'mcp__nanoclaw__*',
+    ...(containerInput.isScheduledTask ? [] : ['mcp__nanoclaw__*']),
   ];
 
-  // Build MCP server config — conditionally add memory server.
-  const mcpServerConfig: Record<string, McpServerConfig> = {
-    nanoclaw: {
+  // Build MCP server config — conditionally add servers.
+  const mcpServerConfig: Record<string, McpServerConfig> = {};
+
+  // Only register nanoclaw MCP server (WhatsApp tools) for interactive use,
+  // not bench/scheduled tasks where send_message etc. are irrelevant.
+  if (!containerInput.isScheduledTask) {
+    mcpServerConfig.nanoclaw = {
       command: 'node',
       args: [mcpServerPath],
       env: {
@@ -540,8 +549,8 @@ async function runQuery(
         NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
         NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
       },
-    },
-  };
+    };
+  }
 
   // Register memory MCP server when config is present and server file exists.
   if (containerInput.memoryMcp && fs.existsSync('/app/memory/mcp_server.py')) {
