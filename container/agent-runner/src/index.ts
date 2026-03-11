@@ -73,42 +73,6 @@ const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
-const MEMORY_MCP_SCRIPT = '/app/memory/mcp_server.py';
-const MEMORY_DB_MOUNT_DIR = '/app/memory-db';
-const MEMORY_DB_CANDIDATES = [
-  '/workspace/memory/memory.sqlite',
-  '/workspace/memory.sqlite',
-  '/app/memory/memory.sqlite',
-];
-
-/**
- * Locate the memory SQLite DB by checking known candidate paths.
- * Returns the first path that exists on disk, or null if none found.
- *
- * Priority:
- * 1. MEMORY_DB_PATH env var (set by orchestrator payload)
- * 2. Directory mount at /app/memory-db/ (supports WAL mode)
- * 3. Fixed candidate paths
- */
-function findMemoryDb(): string | null {
-  // Check MEMORY_DB_PATH env var first (set by orchestrator payload)
-  const envPath = process.env.MEMORY_DB_PATH;
-  if (envPath && fs.existsSync(envPath)) return envPath;
-
-  // Prefer mounted DB directory (supports WAL mode with directory mount)
-  if (fs.existsSync(MEMORY_DB_MOUNT_DIR)) {
-    try {
-      const files = fs.readdirSync(MEMORY_DB_MOUNT_DIR).filter((f: string) => f.endsWith('.sqlite'));
-      if (files.length > 0) return path.join(MEMORY_DB_MOUNT_DIR, files[0]);
-    } catch { /* fall through */ }
-  }
-
-  for (const candidate of MEMORY_DB_CANDIDATES) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
 /**
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
@@ -480,41 +444,6 @@ async function runQuery(
   }
   if (extraDirs.length > 0) {
     log(`Additional directories: ${extraDirs.join(', ')}`);
-  }
-
-  // Build MCP servers config — conditionally include nanoclaw (WhatsApp tools)
-  const mcpServersConfig: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
-
-  // Only register nanoclaw MCP server (WhatsApp tools) for interactive use,
-  // not bench/scheduled tasks where send_message etc. are irrelevant.
-  if (!containerInput.isScheduledTask) {
-    mcpServersConfig.nanoclaw = {
-      command: 'node',
-      args: [mcpServerPath],
-      env: {
-        NANOCLAW_CHAT_JID: containerInput.chatJid,
-        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-      },
-    };
-  }
-
-  // Only register memory MCP server when both the script and DB file exist
-  const memoryDbPath = findMemoryDb();
-  if (memoryDbPath && fs.existsSync(MEMORY_MCP_SCRIPT)) {
-    log(`Memory MCP server enabled: db=${memoryDbPath}`);
-    mcpServersConfig.memory = {
-      command: 'python3',
-      args: [MEMORY_MCP_SCRIPT],
-      env: {
-        MEMORY_DB_PATH: memoryDbPath,
-        FORUM_GENERATION: String(containerInput.metadata?.forum_generation || '0'),
-        FORUM_AGENT_ID: String(containerInput.metadata?.forum_agent_id || ''),
-        FORUM_EXPECTED_AGENTS: String(containerInput.metadata?.forum_expected_agents || '0'),
-      },
-    };
-  } else {
-    log(`Memory MCP server skipped: script=${fs.existsSync(MEMORY_MCP_SCRIPT)}, db=${memoryDbPath || 'not found'}`);
   }
 
   const selectedModel = sdkEnv.MODEL;
