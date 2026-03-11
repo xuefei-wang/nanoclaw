@@ -7,13 +7,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 IMAGE_NAME="nanoclaw-agent"
-TAG="${1:-latest}"
+DOCKERFILE="Dockerfile"
+TAG="latest"
+
+# Parse arguments: --bench selects Dockerfile.bench, anything else is the image tag
+for arg in "$@"; do
+    case "$arg" in
+        --bench) DOCKERFILE="Dockerfile.bench"; TAG="bench" ;;
+        *) TAG="$arg" ;;
+    esac
+done
+
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 
 echo "Building NanoClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
+echo "Dockerfile: ${DOCKERFILE}"
 
-${CONTAINER_RUNTIME} build -t "${IMAGE_NAME}:${TAG}" .
+${CONTAINER_RUNTIME} build -f "$DOCKERFILE" -t "${IMAGE_NAME}:${TAG}" .
 
 echo ""
 echo "Build complete!"

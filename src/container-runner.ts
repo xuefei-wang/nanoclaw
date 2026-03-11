@@ -122,14 +122,15 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
+    const enableAgentTeams = !process.env.NANOCLAW_DISABLE_AGENT_TEAMS;
     fs.writeFileSync(
       settingsFile,
       JSON.stringify(
         {
           env: {
-            // Enable agent swarms (subagent orchestration)
+            // Enable agent swarms (subagent orchestration) unless explicitly disabled
             // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+            ...(enableAgentTeams ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' } : {}),
             // Load CLAUDE.md from additional mounted directories
             // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
             CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
