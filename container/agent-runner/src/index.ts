@@ -541,6 +541,32 @@ async function runQuery(
     if (typeof maybeResult === 'string' && maybeResult.trim()) {
       record.result_excerpt = maybeResult.slice(0, 240);
     }
+
+    // Extract tool_use blocks from assistant message content.
+    // SDK embeds tool calls as content blocks with type 'tool_use' inside
+    // the assistant message's message.content array.
+    if (message.type === 'assistant') {
+      const msgContent = (message as { message?: { content?: Array<{ type: string; name?: string; id?: string }> } }).message?.content;
+      if (Array.isArray(msgContent)) {
+        const toolUses = msgContent
+          .filter((block) => block.type === 'tool_use' && block.name)
+          .map((block) => ({ name: block.name!, id: block.id }));
+        if (toolUses.length > 0) {
+          record.tool_uses = toolUses.map((t) => t.name);
+          // Also emit individual tool trace entries for each tool call
+          for (const tu of toolUses) {
+            toolTrace.push({
+              idx: messageCount,
+              type: 'tool_call',
+              tool_name: tu.name,
+              tool_use_id: tu.id,
+              ts: record.ts,
+            });
+          }
+        }
+      }
+    }
+
     toolTrace.push(record);
     if (toolTrace.length > 2000) toolTrace.shift();
 
