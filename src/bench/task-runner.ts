@@ -253,6 +253,9 @@ async function main(): Promise<void> {
     });
   }
 
+  // Disable agent teams in bench mode to prevent token-consuming sub-agents
+  process.env.NANOCLAW_DISABLE_AGENT_TEAMS = '1';
+
   const group: RegisteredGroup = {
     name: `swarms-${payload.agent_id}`,
     folder: groupFolder,
