@@ -191,13 +191,13 @@ function buildPrompt(payload: SwarmsPayload): string {
   const activeTaskDir = `/workspace/group/workspace/tasks/${taskFolder}`;
   const taskHint = [
     'Use this workspace:',
+    '- Only edit files under the active task repo path.',
     '- Shared guidance:',
     '  - /workspace/group/workspace/INSTRUCTION.md',
-    '  - /workspace/group/workspace/MEMORY.md (seed knowledge from prior generations)',
+    '  - /workspace/group/workspace/MEMORY.md (pointers to collective memory)',
     `- Active task workspace: ${activeTaskDir}`,
     `  - ${activeTaskDir}/TASK.md`,
     `  - ${activeTaskDir}/repo`,
-    'Only edit files under the active task repo path.',
   ].join('\n');
   return `${instruction}\n\n${taskHint}\n`;
 }
@@ -311,10 +311,20 @@ async function main(): Promise<void> {
     // which may have result: null when the real result was captured via onOutput.
     const effectiveOutput = lastOutput?.result != null ? lastOutput : result;
 
+    const rawTrace =
+      ((effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? []) as Array<Record<string, unknown>>;
+
+    // Build tool call summary from trace entries for easy querying.
+    const toolCallCounts: Record<string, number> = {};
+    for (const entry of rawTrace) {
+      if (entry.type === 'tool_call' && typeof entry.tool_name === 'string') {
+        toolCallCounts[entry.tool_name] = (toolCallCounts[entry.tool_name] || 0) + 1;
+      }
+    }
+
     const output = {
       result: effectiveOutput.result ?? effectiveOutput.error ?? '',
-      tool_trace:
-        (effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? [],
+      tool_trace: rawTrace,
       meta: {
         generation: payload.generation,
         agent_id: payload.agent_id,
@@ -329,6 +339,7 @@ async function main(): Promise<void> {
         memory_db_path: payload.memory?.db_path || '',
         model_requested: process.env.MODEL || '',
         native_session_memory: '',
+        tool_call_counts: toolCallCounts,
       },
     };
     process.stdout.write(JSON.stringify(output) + '\n');
