@@ -37,6 +37,16 @@ interface ContainerInput {
     forumExpectedAgents?: number;
     experiment?: string;
   };
+  /** ARC grid MCP config — register arc_grid tools when present. */
+  arcMcp?: {
+    serverDir: string;
+    taskId: string;
+    trainJson: string;
+    testInputsJson: string;
+    expectedOutputsJson: string;
+    maxTrials: number;
+    stateJsonPath: string;
+  };
 }
 
 interface ContainerOutput {
@@ -498,6 +508,24 @@ async function runQuery(
     };
     allowedToolsList.push('mcp__memory__*');
     log('Memory MCP server registered');
+  }
+
+  // Register ARC grid MCP server when config is present and server file exists.
+  if (containerInput.arcMcp && fs.existsSync('/app/arc/mcp_server.py')) {
+    mcpServerConfig.arc_grid = {
+      command: 'python3',
+      args: ['/app/arc/mcp_server.py'],
+      env: {
+        ARC_TASK_ID: containerInput.arcMcp.taskId || '',
+        ARC_TRAIN_JSON: containerInput.arcMcp.trainJson || '[]',
+        ARC_TEST_INPUTS_JSON: containerInput.arcMcp.testInputsJson || '[]',
+        ARC_EXPECTED_OUTPUTS_JSON: containerInput.arcMcp.expectedOutputsJson || '[]',
+        ARC_MAX_TRIALS: String(containerInput.arcMcp.maxTrials || 2),
+        ARC_STATE_JSON_PATH: containerInput.arcMcp.stateJsonPath || '/workspace/group/workspace/arc_state.json',
+      },
+    };
+    allowedToolsList.push('mcp__arc_grid__*');
+    log('ARC grid MCP server registered');
   }
 
   for await (const message of query({

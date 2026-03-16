@@ -48,6 +48,16 @@ export interface ContainerInput {
     forumExpectedAgents?: number;
     experiment?: string;
   };
+  /** ARC grid MCP config — when set, mounts/registers ARC interface tools. */
+  arcMcp?: {
+    serverDir: string;
+    taskId: string;
+    trainJson: string;
+    testInputsJson: string;
+    expectedOutputsJson: string;
+    maxTrials: number;
+    stateJsonPath: string;
+  };
 }
 
 export interface ContainerOutput {
@@ -260,6 +270,13 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Optional network mode for environments where default bridge networking
+  // cannot reach external APIs from inside containers.
+  const networkMode = process.env.NANOCLAW_DOCKER_NETWORK_MODE?.trim();
+  if (networkMode) {
+    args.push('--network', networkMode);
+  }
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
   // Forward explicit provider/model/auth selection and memory DB path into the
@@ -340,6 +357,20 @@ export async function runContainerAgent(
           'Memory MCP server directory does not exist — memory MCP will not be available',
         );
       }
+    }
+  }
+  if (input.arcMcp) {
+    if (fs.existsSync(input.arcMcp.serverDir)) {
+      mounts.push({
+        hostPath: input.arcMcp.serverDir,
+        containerPath: '/app/arc',
+        readonly: true,
+      });
+    } else {
+      logger.warn(
+        { group: group.name, serverDir: input.arcMcp.serverDir },
+        'ARC MCP server directory does not exist — arc_grid MCP will not be available',
+      );
     }
   }
 

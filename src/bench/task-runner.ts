@@ -33,6 +33,10 @@ interface MemoryConfig {
   mcp_server_dir?: string;
 }
 
+interface ArcConfig {
+  mcp_server_dir?: string;
+}
+
 interface SwarmsPayload {
   generation: number;
   agent_id: string;
@@ -43,6 +47,9 @@ interface SwarmsPayload {
   experiment_name?: string;
   memory?: {
     db_path: string;
+    mcp_server_dir: string;
+  };
+  arc?: {
     mcp_server_dir: string;
   };
 }
@@ -228,6 +235,7 @@ async function main(): Promise<void> {
   // Set up memory mounts if memory DB path is configured
   const memoryDbPath = payload.memory?.db_path || '';
   const mcpServerDir = payload.memory?.mcp_server_dir || '';
+  const arcMcpServerDir = payload.arc?.mcp_server_dir || '';
 
   const additionalMounts: Array<{hostPath: string; containerPath: string; readonly: boolean}> = [];
   if (memoryDbPath) {
@@ -279,6 +287,20 @@ async function main(): Promise<void> {
       experiment: payload.experiment_name,
     } : undefined;
 
+    const taskMeta = (payload.task?.metadata ?? {}) as Record<string, unknown>;
+    const taskSource = String(taskMeta.task_source || '').trim().toLowerCase();
+    const taskFolder = safeTaskDir(payload.task?.id || 'task');
+    const activeTaskDir = `/workspace/group/workspace/tasks/${taskFolder}`;
+    const arcMcp = (taskSource === 'arc' && arcMcpServerDir) ? {
+      serverDir: path.resolve(arcMcpServerDir),
+      taskId: payload.task?.id || '',
+      trainJson: JSON.stringify(taskMeta.arc_train ?? []),
+      testInputsJson: JSON.stringify(taskMeta.arc_test_inputs ?? []),
+      expectedOutputsJson: JSON.stringify(taskMeta.arc_expected_outputs ?? []),
+      maxTrials: Number(taskMeta.arc_max_trials ?? 2),
+      stateJsonPath: `${activeTaskDir}/arc_state.json`,
+    } : undefined;
+
     const result = await runContainerAgent(
       group,
       {
@@ -290,6 +312,7 @@ async function main(): Promise<void> {
         isScheduledTask: true,
         assistantName: 'Swarms',
         memoryMcp,
+        arcMcp,
       },
       () => {},
       async (streamed) => {
