@@ -237,7 +237,11 @@ async function main(): Promise<void> {
   const mcpServerDir = payload.memory?.mcp_server_dir || '';
   const arcMcpServerDir = payload.arc?.mcp_server_dir || '';
 
-  const additionalMounts: Array<{hostPath: string; containerPath: string; readonly: boolean}> = [];
+  const additionalMounts: Array<{
+    hostPath: string;
+    containerPath: string;
+    readonly: boolean;
+  }> = [];
   if (memoryDbPath) {
     // Mount the directory containing the SQLite DB (SQLite needs WAL/SHM files too)
     const dbDir = path.dirname(path.resolve(memoryDbPath));
@@ -245,7 +249,7 @@ async function main(): Promise<void> {
       additionalMounts.push({
         hostPath: dbDir,
         containerPath: '/app/memory-db',
-        readonly: false,  // Forum debate needs write access
+        readonly: false, // Forum debate needs write access
       });
       // Set the container-side path so findMemoryDb() picks the correct file
       // when multiple .sqlite files exist in the same directory.
@@ -270,7 +274,8 @@ async function main(): Promise<void> {
     trigger: '@Swarms',
     added_at: new Date().toISOString(),
     requiresTrigger: false,
-    containerConfig: additionalMounts.length > 0 ? { additionalMounts } : undefined,
+    containerConfig:
+      additionalMounts.length > 0 ? { additionalMounts } : undefined,
   };
 
   try {
@@ -278,28 +283,43 @@ async function main(): Promise<void> {
     let latestSessionId: string | undefined = sessionId;
 
     // Build memory MCP config from payload if present.
-    const memoryMcp = payload.memory ? {
-      dbPath: payload.memory.db_path,
-      serverDir: payload.memory.mcp_server_dir,
-      forumGeneration: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_generation as number | undefined,
-      forumAgentId: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_agent_id as string | undefined,
-      forumExpectedAgents: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_expected_agents as number | undefined,
-      experiment: payload.experiment_name,
-    } : undefined;
+    const memoryMcp = payload.memory
+      ? {
+          dbPath: payload.memory.db_path,
+          serverDir: payload.memory.mcp_server_dir,
+          forumGeneration: (
+            (payload.task?.metadata ?? {}) as Record<string, unknown>
+          ).forum_generation as number | undefined,
+          forumAgentId: (
+            (payload.task?.metadata ?? {}) as Record<string, unknown>
+          ).forum_agent_id as string | undefined,
+          forumExpectedAgents: (
+            (payload.task?.metadata ?? {}) as Record<string, unknown>
+          ).forum_expected_agents as number | undefined,
+          experiment: payload.experiment_name,
+        }
+      : undefined;
 
     const taskMeta = (payload.task?.metadata ?? {}) as Record<string, unknown>;
-    const taskSource = String(taskMeta.task_source || '').trim().toLowerCase();
+    const taskSource = String(taskMeta.task_source || '')
+      .trim()
+      .toLowerCase();
     const taskFolder = safeTaskDir(payload.task?.id || 'task');
     const activeTaskDir = `/workspace/group/workspace/tasks/${taskFolder}`;
-    const arcMcp = (taskSource === 'arc' && arcMcpServerDir) ? {
-      serverDir: path.resolve(arcMcpServerDir),
-      taskId: payload.task?.id || '',
-      trainJson: JSON.stringify(taskMeta.arc_train ?? []),
-      testInputsJson: JSON.stringify(taskMeta.arc_test_inputs ?? []),
-      expectedOutputsJson: JSON.stringify(taskMeta.arc_expected_outputs ?? []),
-      maxTrials: Number(taskMeta.arc_max_trials ?? 2),
-      stateJsonPath: `${activeTaskDir}/arc_state.json`,
-    } : undefined;
+    const arcMcp =
+      taskSource === 'arc' && arcMcpServerDir
+        ? {
+            serverDir: path.resolve(arcMcpServerDir),
+            taskId: payload.task?.id || '',
+            trainJson: JSON.stringify(taskMeta.arc_train ?? []),
+            testInputsJson: JSON.stringify(taskMeta.arc_test_inputs ?? []),
+            expectedOutputsJson: JSON.stringify(
+              taskMeta.arc_expected_outputs ?? [],
+            ),
+            maxTrials: Number(taskMeta.arc_max_trials ?? 2),
+            stateJsonPath: `${activeTaskDir}/arc_state.json`,
+          }
+        : undefined;
 
     const result = await runContainerAgent(
       group,
@@ -334,14 +354,15 @@ async function main(): Promise<void> {
     // which may have result: null when the real result was captured via onOutput.
     const effectiveOutput = lastOutput?.result != null ? lastOutput : result;
 
-    const rawTrace =
-      ((effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? []) as Array<Record<string, unknown>>;
+    const rawTrace = ((effectiveOutput as unknown as Record<string, unknown>)
+      .toolTrace ?? []) as Array<Record<string, unknown>>;
 
     // Build tool call summary from trace entries for easy querying.
     const toolCallCounts: Record<string, number> = {};
     for (const entry of rawTrace) {
       if (entry.type === 'tool_call' && typeof entry.tool_name === 'string') {
-        toolCallCounts[entry.tool_name] = (toolCallCounts[entry.tool_name] || 0) + 1;
+        toolCallCounts[entry.tool_name] =
+          (toolCallCounts[entry.tool_name] || 0) + 1;
       }
     }
 

@@ -140,7 +140,9 @@ function buildVolumeMounts(
           env: {
             // Enable agent swarms (subagent orchestration) unless explicitly disabled
             // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            ...(enableAgentTeams ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' } : {}),
+            ...(enableAgentTeams
+              ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' }
+              : {}),
             // Load CLAUDE.md from additional mounted directories
             // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
             CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
@@ -281,7 +283,12 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
   // Forward explicit provider/model/auth selection and memory DB path into the
   // container so the SDK and MCP server resolve correctly.
-  for (const key of ['MODEL_PROVIDER', 'MODEL', 'MODEL_AUTH_MODE', 'MEMORY_DB_PATH']) {
+  for (const key of [
+    'MODEL_PROVIDER',
+    'MODEL',
+    'MODEL_AUTH_MODE',
+    'MEMORY_DB_PATH',
+  ]) {
     const value = process.env[key];
     if (value && value.trim()) {
       args.push('-e', `${key}=${value}`);
