@@ -242,14 +242,20 @@ function buildVolumeMounts(
 function readSecrets(): Record<string, string> {
   const fromFile = readEnvFile([
     'CLAUDE_CODE_OAUTH_TOKEN',
+    'CLAUDE_CODE_OAUTH_REFRESH_TOKEN',
+    'CLAUDE_CODE_OAUTH_SCOPES',
     'ANTHROPIC_API_KEY',
   ]);
   const out: Record<string, string> = { ...fromFile };
-  if (!out.CLAUDE_CODE_OAUTH_TOKEN && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    out.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  }
-  if (!out.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY) {
-    out.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  for (const key of [
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'CLAUDE_CODE_OAUTH_REFRESH_TOKEN',
+    'CLAUDE_CODE_OAUTH_SCOPES',
+    'ANTHROPIC_API_KEY',
+  ]) {
+    if (!out[key] && process.env[key]) {
+      out[key] = process.env[key]!;
+    }
   }
   return out;
 }
