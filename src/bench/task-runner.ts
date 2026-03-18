@@ -185,6 +185,106 @@ function cleanupGroup(groupFolder: string): void {
   }
 }
 
+function envInt(name: string, defaultValue: number): number {
+  const raw = (process.env[name] || '').trim();
+  if (!raw) return defaultValue;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed)) return defaultValue;
+  return parsed;
+}
+
+function walkFiles(root: string, filter: (absPath: string) => boolean): string[] {
+  const out: string[] = [];
+  if (!fs.existsSync(root)) return out;
+  const stack: string[] = [root];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const ent of entries) {
+      const abs = path.join(current, ent.name);
+      if (ent.isDirectory()) {
+        stack.push(abs);
+      } else if (ent.isFile() && filter(abs)) {
+        out.push(abs);
+      }
+    }
+  }
+  return out;
+}
+
+function collectNativeSessionMemory(groupFolder: string): string {
+  if (!groupFolder) return '';
+  const maxChars = envInt('SWARMS_NATIVE_MEMORY_MAX_CHARS', 240_000);
+  const maxFiles = envInt('SWARMS_NATIVE_MEMORY_MAX_FILES', 8);
+  const maxCharsPerFile = envInt('SWARMS_NATIVE_MEMORY_MAX_CHARS_PER_FILE', 60_000);
+  if (maxChars <= 0) return '';
+
+  const claudeRoot = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
+  const files = walkFiles(claudeRoot, (p) => ['.jsonl', '.md', '.txt'].includes(path.extname(p).toLowerCase()));
+  if (files.length === 0) return '';
+  files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+
+  const selected = maxFiles > 0 ? files.slice(0, maxFiles) : files;
+  const blocks: string[] = [];
+  let total = 0;
+  for (const file of selected) {
+    let raw = '';
+    try {
+      raw = fs.readFileSync(file, 'utf-8');
+    } catch {
+      continue;
+    }
+    if (!raw.trim()) continue;
+    const chunk =
+      maxCharsPerFile > 0 && raw.length > maxCharsPerFile
+        ? raw.slice(-maxCharsPerFile)
+        : raw;
+    const rel = path.relative(claudeRoot, file);
+    const wrapped = `# file: ${rel}\n${chunk}\n`;
+    blocks.push(wrapped);
+    total += wrapped.length + (blocks.length > 1 ? '\n\n---\n\n'.length : 0);
+    if (total >= maxChars) break;
+  }
+
+  let merged = blocks.join('\n\n---\n\n').trim();
+  if (merged.length > maxChars) {
+    merged = merged.slice(-maxChars);
+  }
+  return merged;
+}
+
+function collectConversationArchives(groupFolder: string): Array<{ path: string; content: string }> {
+  if (!groupFolder) return [];
+  const maxFiles = envInt('SWARMS_ARCHIVE_MAX_FILES', 8);
+  const maxCharsPerFile = envInt('SWARMS_ARCHIVE_MAX_CHARS_PER_FILE', 30_000);
+  if (maxFiles <= 0) return [];
+
+  const convRoot = path.join(GROUPS_DIR, groupFolder, 'conversations');
+  const files = walkFiles(convRoot, (p) => path.extname(p).toLowerCase() === '.md');
+  if (files.length === 0) return [];
+  files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+
+  const out: Array<{ path: string; content: string }> = [];
+  for (const file of files.slice(0, maxFiles)) {
+    let content = '';
+    try {
+      content = fs.readFileSync(file, 'utf-8');
+    } catch {
+      continue;
+    }
+    if (maxCharsPerFile > 0 && content.length > maxCharsPerFile) {
+      content = content.slice(-maxCharsPerFile);
+    }
+    out.push({ path: path.relative(convRoot, file), content });
+  }
+  return out;
+}
+
 function buildPrompt(payload: SwarmsPayload): string {
   const instruction = (payload.execution_prompt || '').trim();
   const taskFolder = safeTaskDir(payload.task?.id || 'task');
@@ -318,9 +418,28 @@ async function main(): Promise<void> {
     const toolCallCounts: Record<string, number> = {};
     for (const entry of rawTrace) {
       if (entry.type === 'tool_call' && typeof entry.tool_name === 'string') {
-        toolCallCounts[entry.tool_name] = (toolCallCounts[entry.tool_name] || 0) + 1;
+        const name = entry.tool_name;
+        toolCallCounts[name] = (toolCallCounts[name] || 0) + 1;
       }
     }
+    const memoryToolCallCounts: Record<string, number> = {};
+    const arcToolCallCounts: Record<string, number> = {};
+    const forumToolCallCounts: Record<string, number> = {};
+    for (const [name, count] of Object.entries(toolCallCounts)) {
+      if (name.startsWith('mcp__memory__')) {
+        memoryToolCallCounts[name] = count;
+      }
+      if (name.startsWith('mcp__memory__arc_')) {
+        arcToolCallCounts[name] = count;
+      }
+      if (name.startsWith('mcp__memory__forum_')) {
+        forumToolCallCounts[name] = count;
+      }
+    }
+
+    // Capture native artifacts before potential task-scope cleanup.
+    const nativeSessionMemory = collectNativeSessionMemory(groupFolder);
+    const conversationArchives = collectConversationArchives(groupFolder);
 
     const output = {
       result: effectiveOutput.result ?? effectiveOutput.error ?? '',
@@ -338,8 +457,12 @@ async function main(): Promise<void> {
         active_task_dir: `/workspace/group/workspace/tasks/${safeTaskDir(payload.task?.id || 'task')}`,
         memory_db_path: payload.memory?.db_path || '',
         model_requested: process.env.MODEL || '',
-        native_session_memory: '',
+        native_session_memory: nativeSessionMemory,
+        conversation_archives: conversationArchives,
         tool_call_counts: toolCallCounts,
+        memory_tool_call_counts: memoryToolCallCounts,
+        arc_tool_call_counts: arcToolCallCounts,
+        forum_tool_call_counts: forumToolCallCounts,
       },
     };
     process.stdout.write(JSON.stringify(output) + '\n');
