@@ -277,6 +277,7 @@ async function main(): Promise<void> {
       forumAgentId: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_agent_id as string | undefined,
       forumExpectedAgents: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_expected_agents as number | undefined,
       experiment: payload.experiment_name,
+      searchMode: payload.memory.search_mode,
     } : undefined;
 
     const result = await runContainerAgent(
