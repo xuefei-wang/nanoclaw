@@ -36,6 +36,7 @@ interface ContainerInput {
     forumAgentId?: string;
     forumExpectedAgents?: number;
     experiment?: string;
+    searchMode?: string;
   };
 }
 
@@ -489,7 +490,7 @@ async function runQuery(
       args: ['/app/memory/mcp_server.py'],
       env: {
         MEMORY_DB_PATH: `/app/memory-db/${dbFile}`,
-        MEMORY_SEARCH_MODE: 'fts',
+        MEMORY_SEARCH_MODE: containerInput.memoryMcp.searchMode || 'fts',
         FORUM_GENERATION: String(containerInput.memoryMcp.forumGeneration ?? 0),
         FORUM_AGENT_ID: containerInput.memoryMcp.forumAgentId ?? '',
         FORUM_EXPECTED_AGENTS: String(containerInput.memoryMcp.forumExpectedAgents ?? 0),
