@@ -193,7 +193,10 @@ function envInt(name: string, defaultValue: number): number {
   return parsed;
 }
 
-function walkFiles(root: string, filter: (absPath: string) => boolean): string[] {
+function walkFiles(
+  root: string,
+  filter: (absPath: string) => boolean,
+): string[] {
   const out: string[] = [];
   if (!fs.existsSync(root)) return out;
   const stack: string[] = [root];
@@ -221,11 +224,16 @@ function collectNativeSessionMemory(groupFolder: string): string {
   if (!groupFolder) return '';
   const maxChars = envInt('SWARMS_NATIVE_MEMORY_MAX_CHARS', 240_000);
   const maxFiles = envInt('SWARMS_NATIVE_MEMORY_MAX_FILES', 8);
-  const maxCharsPerFile = envInt('SWARMS_NATIVE_MEMORY_MAX_CHARS_PER_FILE', 60_000);
+  const maxCharsPerFile = envInt(
+    'SWARMS_NATIVE_MEMORY_MAX_CHARS_PER_FILE',
+    60_000,
+  );
   if (maxChars <= 0) return '';
 
   const claudeRoot = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
-  const files = walkFiles(claudeRoot, (p) => ['.jsonl', '.md', '.txt'].includes(path.extname(p).toLowerCase()));
+  const files = walkFiles(claudeRoot, (p) =>
+    ['.jsonl', '.md', '.txt'].includes(path.extname(p).toLowerCase()),
+  );
   if (files.length === 0) return '';
   files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 
@@ -258,14 +266,19 @@ function collectNativeSessionMemory(groupFolder: string): string {
   return merged;
 }
 
-function collectConversationArchives(groupFolder: string): Array<{ path: string; content: string }> {
+function collectConversationArchives(
+  groupFolder: string,
+): Array<{ path: string; content: string }> {
   if (!groupFolder) return [];
   const maxFiles = envInt('SWARMS_ARCHIVE_MAX_FILES', 8);
   const maxCharsPerFile = envInt('SWARMS_ARCHIVE_MAX_CHARS_PER_FILE', 30_000);
   if (maxFiles <= 0) return [];
 
   const convRoot = path.join(GROUPS_DIR, groupFolder, 'conversations');
-  const files = walkFiles(convRoot, (p) => path.extname(p).toLowerCase() === '.md');
+  const files = walkFiles(
+    convRoot,
+    (p) => path.extname(p).toLowerCase() === '.md',
+  );
   if (files.length === 0) return [];
   files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 
@@ -329,7 +342,11 @@ async function main(): Promise<void> {
   const memoryDbPath = payload.memory?.db_path || '';
   const mcpServerDir = payload.memory?.mcp_server_dir || '';
 
-  const additionalMounts: Array<{hostPath: string; containerPath: string; readonly: boolean}> = [];
+  const additionalMounts: Array<{
+    hostPath: string;
+    containerPath: string;
+    readonly: boolean;
+  }> = [];
   if (memoryDbPath) {
     // Mount the directory containing the SQLite DB (SQLite needs WAL/SHM files too)
     const dbDir = path.dirname(path.resolve(memoryDbPath));
@@ -337,7 +354,7 @@ async function main(): Promise<void> {
       additionalMounts.push({
         hostPath: dbDir,
         containerPath: '/app/memory-db',
-        readonly: false,  // Forum debate needs write access
+        readonly: false, // Forum debate needs write access
       });
       // Set the container-side path so findMemoryDb() picks the correct file
       // when multiple .sqlite files exist in the same directory.
@@ -362,7 +379,8 @@ async function main(): Promise<void> {
     trigger: '@Swarms',
     added_at: new Date().toISOString(),
     requiresTrigger: false,
-    containerConfig: additionalMounts.length > 0 ? { additionalMounts } : undefined,
+    containerConfig:
+      additionalMounts.length > 0 ? { additionalMounts } : undefined,
   };
 
   try {
@@ -370,14 +388,22 @@ async function main(): Promise<void> {
     let latestSessionId: string | undefined = sessionId;
 
     // Build memory MCP config from payload if present.
-    const memoryMcp = payload.memory ? {
-      dbPath: payload.memory.db_path,
-      serverDir: payload.memory.mcp_server_dir,
-      forumGeneration: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_generation as number | undefined,
-      forumAgentId: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_agent_id as string | undefined,
-      forumExpectedAgents: ((payload.task?.metadata ?? {}) as Record<string, unknown>).forum_expected_agents as number | undefined,
-      experiment: payload.experiment_name,
-    } : undefined;
+    const memoryMcp = payload.memory
+      ? {
+          dbPath: payload.memory.db_path,
+          serverDir: payload.memory.mcp_server_dir,
+          forumGeneration: (
+            (payload.task?.metadata ?? {}) as Record<string, unknown>
+          ).forum_generation as number | undefined,
+          forumAgentId: (
+            (payload.task?.metadata ?? {}) as Record<string, unknown>
+          ).forum_agent_id as string | undefined,
+          forumExpectedAgents: (
+            (payload.task?.metadata ?? {}) as Record<string, unknown>
+          ).forum_expected_agents as number | undefined,
+          experiment: payload.experiment_name,
+        }
+      : undefined;
 
     const result = await runContainerAgent(
       group,
@@ -411,8 +437,8 @@ async function main(): Promise<void> {
     // which may have result: null when the real result was captured via onOutput.
     const effectiveOutput = lastOutput?.result != null ? lastOutput : result;
 
-    const rawTrace =
-      ((effectiveOutput as unknown as Record<string, unknown>).toolTrace ?? []) as Array<Record<string, unknown>>;
+    const rawTrace = ((effectiveOutput as unknown as Record<string, unknown>)
+      .toolTrace ?? []) as Array<Record<string, unknown>>;
 
     // Build tool call summary from trace entries for easy querying.
     const toolCallCounts: Record<string, number> = {};
