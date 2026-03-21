@@ -309,16 +309,6 @@ function buildPrompt(payload: SwarmsPayload): string {
   const instruction = (payload.execution_prompt || '').trim();
   const taskFolder = safeTaskDir(payload.task?.id || 'task');
   const activeTaskDir = `/workspace/group/workspace/tasks/${taskFolder}`;
-  const taskSource = String(
-    ((payload.task?.metadata ?? {}) as Record<string, unknown>).task_source ??
-      '',
-  )
-    .trim()
-    .toLowerCase();
-  const forumHint =
-    taskSource === 'forum_debate' || taskSource === 'forum_self'
-      ? `\n- Forum workspace files:\n  - ${activeTaskDir}/FORUM_TASKS.md (task-grounding index for forum stage)`
-      : '';
   const taskHint = [
     'Use this workspace:',
     '- Only edit files under the active task repo path.',
@@ -327,9 +317,7 @@ function buildPrompt(payload: SwarmsPayload): string {
     '  - /workspace/group/workspace/MEMORY.md (pointers to collective memory)',
     `- Active task workspace: ${activeTaskDir}`,
     `  - ${activeTaskDir}/TASK.md`,
-    `  - ${activeTaskDir}/FORUM_TASKS.md (only for forum tasks)`,
     `  - ${activeTaskDir}/repo`,
-    forumHint,
   ].join('\n');
   return `${instruction}\n\n${taskHint}\n`;
 }
@@ -420,13 +408,9 @@ async function main(): Promise<void> {
           forumExpectedAgents: taskMeta.forum_expected_agents as
             | number
             | undefined,
-          forumTaskCodes: Array.isArray(taskMeta.forum_task_codes)
-            ? taskMeta.forum_task_codes
-                .map((x) =>
-                  String(x || '')
-                    .trim()
-                    .toUpperCase(),
-                )
+          forumTaskIds: Array.isArray(taskMeta.forum_task_ids)
+            ? taskMeta.forum_task_ids
+                .map((x) => String(x || '').trim())
                 .filter(Boolean)
             : [],
           experiment: payload.experiment_name,
