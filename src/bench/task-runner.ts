@@ -310,7 +310,8 @@ function buildPrompt(payload: SwarmsPayload): string {
   const taskFolder = safeTaskDir(payload.task?.id || 'task');
   const activeTaskDir = `/workspace/group/workspace/tasks/${taskFolder}`;
   const taskSource = String(
-    ((payload.task?.metadata ?? {}) as Record<string, unknown>).task_source ?? '',
+    ((payload.task?.metadata ?? {}) as Record<string, unknown>).task_source ??
+      '',
   )
     .trim()
     .toLowerCase();
@@ -416,10 +417,16 @@ async function main(): Promise<void> {
           forumGeneration: taskMeta.forum_generation as number | undefined,
           forumRound: taskMeta.forum_round as number | undefined,
           forumAgentId: taskMeta.forum_agent_id as string | undefined,
-          forumExpectedAgents: taskMeta.forum_expected_agents as number | undefined,
+          forumExpectedAgents: taskMeta.forum_expected_agents as
+            | number
+            | undefined,
           forumTaskCodes: Array.isArray(taskMeta.forum_task_codes)
             ? taskMeta.forum_task_codes
-                .map((x) => String(x || '').trim().toUpperCase())
+                .map((x) =>
+                  String(x || '')
+                    .trim()
+                    .toUpperCase(),
+                )
                 .filter(Boolean)
             : [],
           experiment: payload.experiment_name,
