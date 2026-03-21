@@ -32,9 +32,13 @@ interface ContainerInput {
   memoryMcp?: {
     dbPath: string;
     serverDir: string;
+    taskId?: string;
+    taskSource?: string;
     forumGeneration?: number;
+    forumRound?: number;
     forumAgentId?: string;
     forumExpectedAgents?: number;
+    forumTaskCodes?: string[];
     experiment?: string;
   };
 }
@@ -484,19 +488,38 @@ async function runQuery(
   // Register memory MCP server when config is present and server file exists.
   if (containerInput.memoryMcp && fs.existsSync('/app/memory/mcp_server.py')) {
     const dbFile = path.basename(containerInput.memoryMcp.dbPath);
+    const taskSource = (containerInput.memoryMcp.taskSource || '').toLowerCase();
+    const memoryToolset = taskSource === 'forum_debate' ? 'forum' : 'task';
     mcpServerConfig.memory = {
       command: 'python3',
       args: ['/app/memory/mcp_server.py'],
       env: {
         MEMORY_DB_PATH: `/app/memory-db/${dbFile}`,
-        MEMORY_SEARCH_MODE: 'fts',
+        MCP_TOOLSET: memoryToolset,
         FORUM_GENERATION: String(containerInput.memoryMcp.forumGeneration ?? 0),
+        FORUM_ROUND: String(containerInput.memoryMcp.forumRound ?? 0),
         FORUM_AGENT_ID: containerInput.memoryMcp.forumAgentId ?? '',
         FORUM_EXPECTED_AGENTS: String(containerInput.memoryMcp.forumExpectedAgents ?? 0),
+        FORUM_TASK_CODES: (containerInput.memoryMcp.forumTaskCodes || []).join(','),
         MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
       },
     };
     allowedToolsList.push('mcp__memory__*');
+
+    if (taskSource === 'arc') {
+      mcpServerConfig.arc = {
+        command: 'python3',
+        args: ['/app/memory/mcp_server.py'],
+        env: {
+          MEMORY_DB_PATH: `/app/memory-db/${dbFile}`,
+          MCP_TOOLSET: 'arc',
+          ARC_TASK_ID: containerInput.memoryMcp.taskId ?? '',
+          MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
+        },
+      };
+      allowedToolsList.push('mcp__arc__*');
+      log('ARC MCP server registered');
+    }
     log('Memory MCP server registered');
   }
 
