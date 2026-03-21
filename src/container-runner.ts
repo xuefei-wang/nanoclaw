@@ -44,6 +44,7 @@ export interface ContainerInput {
     dbPath: string;
     serverDir: string;
     forumGeneration?: number;
+    forumRound?: number;
     forumAgentId?: string;
     forumExpectedAgents?: number;
     experiment?: string;

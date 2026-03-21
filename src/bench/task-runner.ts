@@ -19,6 +19,7 @@ interface WorkspaceSeed {
   memory_md?: string;
   task_md?: string;
   tools_md?: string;
+  task_files?: Record<string, string>;
   repo_source_path?: string;
 }
 
@@ -123,6 +124,7 @@ function seedWorkspace(
   const instruction = (seed.instruction_md || '').trim() + '\n';
   const memory = (seed.memory_md || '').trim() + '\n';
   const taskMd = (seed.task_md || '').trim() + '\n';
+  const taskFiles = seed.task_files || {};
 
   writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
   writeText(path.join(workspaceRoot, 'MEMORY.md'), memory);
@@ -141,6 +143,11 @@ function seedWorkspace(
   }
   ensureDir(taskRoot);
   writeText(path.join(taskRoot, 'TASK.md'), taskMd);
+  for (const [name, content] of Object.entries(taskFiles)) {
+    const fileName = path.basename(String(name || '').trim());
+    if (!fileName || fileName === 'TASK.md') continue;
+    writeText(path.join(taskRoot, fileName), (content || '').trim() + '\n');
+  }
 
   const repoDst = path.join(taskRoot, 'repo');
   fs.rmSync(repoDst, { recursive: true, force: true });
@@ -308,6 +315,16 @@ function buildPrompt(payload: SwarmsPayload): string {
   const instruction = (payload.execution_prompt || '').trim();
   const taskFolder = safeTaskDir(payload.task?.id || 'task');
   const activeTaskDir = `/workspace/group/workspace/tasks/${taskFolder}`;
+  const taskSource = String(
+    ((payload.task?.metadata ?? {}) as Record<string, unknown>).task_source ??
+      '',
+  )
+    .trim()
+    .toLowerCase();
+  const forumHint =
+    taskSource === 'forum_debate' || taskSource === 'forum_self'
+      ? `\n- Forum workspace files:\n  - ${activeTaskDir}/FORUM_TASKS.md (task-grounding index for forum stage)`
+      : '';
   const taskHint = [
     'Use this workspace:',
     '- Only edit files under the active task repo path.',
@@ -317,7 +334,9 @@ function buildPrompt(payload: SwarmsPayload): string {
     '  - /workspace/group/workspace/TOOLS.md (available tools and when to use them)',
     `- Active task workspace: ${activeTaskDir}`,
     `  - ${activeTaskDir}/TASK.md`,
+    `  - ${activeTaskDir}/FORUM_TASKS.md (only for forum tasks)`,
     `  - ${activeTaskDir}/repo`,
+    forumHint,
   ].join('\n');
   return `${instruction}\n\n${taskHint}\n`;
 }
@@ -395,19 +414,28 @@ async function main(): Promise<void> {
     let latestSessionId: string | undefined = sessionId;
 
     // Build memory MCP config from payload if present.
+    const taskMeta = (payload.task?.metadata ?? {}) as Record<string, unknown>;
     const memoryMcp = payload.memory
       ? {
           dbPath: payload.memory.db_path,
           serverDir: payload.memory.mcp_server_dir,
-          forumGeneration: (
-            (payload.task?.metadata ?? {}) as Record<string, unknown>
-          ).forum_generation as number | undefined,
-          forumAgentId: (
-            (payload.task?.metadata ?? {}) as Record<string, unknown>
-          ).forum_agent_id as string | undefined,
-          forumExpectedAgents: (
-            (payload.task?.metadata ?? {}) as Record<string, unknown>
-          ).forum_expected_agents as number | undefined,
+          taskId: payload.task?.id || '',
+          taskSource: String(taskMeta.task_source ?? ''),
+          forumGeneration: taskMeta.forum_generation as number | undefined,
+          forumRound: taskMeta.forum_round as number | undefined,
+          forumAgentId: taskMeta.forum_agent_id as string | undefined,
+          forumExpectedAgents: taskMeta.forum_expected_agents as
+            | number
+            | undefined,
+          forumTaskCodes: Array.isArray(taskMeta.forum_task_codes)
+            ? taskMeta.forum_task_codes
+                .map((x) =>
+                  String(x || '')
+                    .trim()
+                    .toUpperCase(),
+                )
+                .filter(Boolean)
+            : [],
           experiment: payload.experiment_name,
         }
       : undefined;
@@ -462,7 +490,7 @@ async function main(): Promise<void> {
       if (name.startsWith('mcp__memory__')) {
         memoryToolCallCounts[name] = count;
       }
-      if (name.startsWith('mcp__memory__arc_')) {
+      if (name.startsWith('mcp__arc__arc_')) {
         arcToolCallCounts[name] = count;
       }
       if (name.startsWith('mcp__memory__forum_')) {
