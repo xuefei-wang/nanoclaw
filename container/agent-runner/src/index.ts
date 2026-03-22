@@ -38,7 +38,8 @@ interface ContainerInput {
     forumRound?: number;
     forumAgentId?: string;
     forumExpectedAgents?: number;
-    forumTaskCodes?: string[];
+    forumTaskIds?: string[];
+    enableSpecialtyQuery?: boolean;
     experiment?: string;
   };
 }
@@ -500,7 +501,8 @@ async function runQuery(
         FORUM_ROUND: String(containerInput.memoryMcp.forumRound ?? 0),
         FORUM_AGENT_ID: containerInput.memoryMcp.forumAgentId ?? '',
         FORUM_EXPECTED_AGENTS: String(containerInput.memoryMcp.forumExpectedAgents ?? 0),
-        FORUM_TASK_CODES: (containerInput.memoryMcp.forumTaskCodes || []).join(','),
+        FORUM_TASK_IDS: (containerInput.memoryMcp.forumTaskIds || []).join(','),
+        MEMORY_ENABLE_SPECIALTY_QUERY: containerInput.memoryMcp.enableSpecialtyQuery ? '1' : '0',
         MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
       },
     };
