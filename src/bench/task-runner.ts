@@ -33,6 +33,7 @@ interface TaskPayload {
 interface MemoryConfig {
   db_path?: string;
   mcp_server_dir?: string;
+  enable_specialty_query?: boolean;
 }
 
 interface SwarmsPayload {
@@ -46,6 +47,7 @@ interface SwarmsPayload {
   memory?: {
     db_path: string;
     mcp_server_dir: string;
+    enable_specialty_query?: boolean;
   };
 }
 
@@ -420,6 +422,7 @@ async function main(): Promise<void> {
                 .map((x) => String(x || '').trim())
                 .filter(Boolean)
             : [],
+          enableSpecialtyQuery: !!payload.memory?.enable_specialty_query,
           experiment: payload.experiment_name,
         }
       : undefined;
