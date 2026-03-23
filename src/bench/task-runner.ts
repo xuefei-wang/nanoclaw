@@ -48,6 +48,7 @@ interface SwarmsPayload {
     db_path: string;
     mcp_server_dir: string;
     enable_specialty_query?: boolean;
+    embedder_url?: string;
   };
 }
 
@@ -423,6 +424,7 @@ async function main(): Promise<void> {
                 .filter(Boolean)
             : [],
           enableSpecialtyQuery: !!payload.memory?.enable_specialty_query,
+          embedderUrl: (payload.memory?.embedder_url || '').trim(),
           experiment: payload.experiment_name,
         }
       : undefined;

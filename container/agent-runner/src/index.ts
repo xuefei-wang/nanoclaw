@@ -40,6 +40,7 @@ interface ContainerInput {
     forumExpectedAgents?: number;
     forumTaskIds?: string[];
     enableSpecialtyQuery?: boolean;
+    embedderUrl?: string;
     experiment?: string;
   };
 }
@@ -503,6 +504,7 @@ async function runQuery(
         FORUM_EXPECTED_AGENTS: String(containerInput.memoryMcp.forumExpectedAgents ?? 0),
         FORUM_TASK_IDS: (containerInput.memoryMcp.forumTaskIds || []).join(','),
         MEMORY_ENABLE_SPECIALTY_QUERY: containerInput.memoryMcp.enableSpecialtyQuery ? '1' : '0',
+        EMBEDDER_URL: containerInput.memoryMcp.embedderUrl ?? '',
         MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
       },
     };
