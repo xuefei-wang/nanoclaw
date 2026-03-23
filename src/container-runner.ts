@@ -48,6 +48,7 @@ export interface ContainerInput {
     forumAgentId?: string;
     forumExpectedAgents?: number;
     experiment?: string;
+    embedderUrl?: string;
   };
 }
 
@@ -278,6 +279,7 @@ function buildContainerArgs(
     'MODEL',
     'MODEL_AUTH_MODE',
     'MEMORY_DB_PATH',
+    'EMBEDDER_URL',
   ]) {
     const value = process.env[key];
     if (value && value.trim()) {

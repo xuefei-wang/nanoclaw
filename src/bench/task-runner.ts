@@ -34,6 +34,7 @@ interface MemoryConfig {
   db_path?: string;
   mcp_server_dir?: string;
   enable_specialty_query?: boolean;
+  embedder_url?: string;
 }
 
 interface SwarmsPayload {
@@ -48,6 +49,7 @@ interface SwarmsPayload {
     db_path: string;
     mcp_server_dir: string;
     enable_specialty_query?: boolean;
+    embedder_url?: string;
   };
 }
 
@@ -386,6 +388,13 @@ async function main(): Promise<void> {
     });
   }
 
+  // Forward embedder URL so the MCP server inside the container can reach
+  // the host's embedding HTTP service for hybrid (vector + BM25) search.
+  const embedderUrl = payload.memory?.embedder_url || '';
+  if (embedderUrl) {
+    process.env.EMBEDDER_URL = embedderUrl;
+  }
+
   // Disable agent teams in bench mode to prevent token-consuming sub-agents
   process.env.NANOCLAW_DISABLE_AGENT_TEAMS = '1';
 
@@ -424,6 +433,7 @@ async function main(): Promise<void> {
             : [],
           enableSpecialtyQuery: !!payload.memory?.enable_specialty_query,
           experiment: payload.experiment_name,
+          embedderUrl: payload.memory.embedder_url || '',
         }
       : undefined;
 

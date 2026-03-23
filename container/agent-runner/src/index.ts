@@ -41,6 +41,7 @@ interface ContainerInput {
     forumTaskIds?: string[];
     enableSpecialtyQuery?: boolean;
     experiment?: string;
+    embedderUrl?: string;
   };
 }
 
@@ -504,6 +505,7 @@ async function runQuery(
         FORUM_TASK_IDS: (containerInput.memoryMcp.forumTaskIds || []).join(','),
         MEMORY_ENABLE_SPECIALTY_QUERY: containerInput.memoryMcp.enableSpecialtyQuery ? '1' : '0',
         MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
+        EMBEDDER_URL: containerInput.memoryMcp.embedderUrl ?? process.env.EMBEDDER_URL ?? '',
       },
     };
     allowedToolsList.push('mcp__memory__*');
