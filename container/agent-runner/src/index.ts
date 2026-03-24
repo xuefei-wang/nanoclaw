@@ -32,6 +32,7 @@ interface ContainerInput {
   memoryMcp?: {
     dbPath: string;
     serverDir: string;
+    snapshotPath?: string;
     enableSpecialtyQuery?: boolean;
     taskId?: string;
     taskSource?: string;
@@ -489,6 +490,9 @@ async function runQuery(
   // Register memory MCP server when config is present and server file exists.
   if (containerInput.memoryMcp && fs.existsSync('/app/memory/mcp_server.py')) {
     const dbFile = path.basename(containerInput.memoryMcp.dbPath);
+    const snapshotFile = containerInput.memoryMcp.snapshotPath
+      ? path.basename(containerInput.memoryMcp.snapshotPath)
+      : '';
     const taskSource = (containerInput.memoryMcp.taskSource || '').toLowerCase();
     const memoryToolset = taskSource === 'forum_debate' ? 'forum' : 'task';
     mcpServerConfig.memory = {
@@ -504,6 +508,7 @@ async function runQuery(
         FORUM_EXPECTED_AGENTS: String(containerInput.memoryMcp.forumExpectedAgents ?? 0),
         FORUM_TASK_IDS: (containerInput.memoryMcp.forumTaskIds || []).join(','),
         MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
+        MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-snapshot/${snapshotFile}` : '',
       },
     };
     allowedToolsList.push('mcp__memory__*');
@@ -517,6 +522,7 @@ async function runQuery(
           MCP_TOOLSET: 'arc',
           ARC_TASK_ID: containerInput.memoryMcp.taskId ?? '',
           MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
+          MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-snapshot/${snapshotFile}` : '',
         },
       };
       allowedToolsList.push('mcp__arc__*');

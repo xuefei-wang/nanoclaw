@@ -33,6 +33,7 @@ interface MemoryConfig {
   db_path?: string;
   mcp_server_dir?: string;
   enable_specialty_query?: boolean;
+  snapshot_path?: string;
 }
 
 interface SwarmsPayload {
@@ -47,6 +48,7 @@ interface SwarmsPayload {
     db_path: string;
     mcp_server_dir: string;
     enable_specialty_query?: boolean;
+    snapshot_path?: string;
   };
 }
 
@@ -350,6 +352,9 @@ async function main(): Promise<void> {
   // Set up memory mounts if memory DB path is configured
   const memoryDbPath = payload.memory?.db_path || '';
   const mcpServerDir = payload.memory?.mcp_server_dir || '';
+  const memorySnapshotPath = payload.memory?.snapshot_path || '';
+  const taskSource = String((payload.task?.metadata || {}).task_source || '').toLowerCase();
+  const forumWritesNeeded = taskSource === 'forum_debate' || taskSource === 'forum_self';
 
   const additionalMounts: Array<{
     hostPath: string;
@@ -363,7 +368,7 @@ async function main(): Promise<void> {
       additionalMounts.push({
         hostPath: dbDir,
         containerPath: '/app/memory-db',
-        readonly: false, // Forum debate needs write access
+        readonly: !forumWritesNeeded,
       });
       // Set the container-side path so findMemoryDb() picks the correct file
       // when multiple .sqlite files exist in the same directory.
@@ -375,6 +380,13 @@ async function main(): Promise<void> {
     additionalMounts.push({
       hostPath: path.resolve(mcpServerDir),
       containerPath: '/app/memory',
+      readonly: true,
+    });
+  }
+  if (memorySnapshotPath && fs.existsSync(memorySnapshotPath)) {
+    additionalMounts.push({
+      hostPath: path.dirname(path.resolve(memorySnapshotPath)),
+      containerPath: '/app/memory-snapshot',
       readonly: true,
     });
   }
@@ -403,6 +415,7 @@ async function main(): Promise<void> {
           dbPath: payload.memory.db_path,
           serverDir: payload.memory.mcp_server_dir,
           enableSpecialtyQuery: Boolean(payload.memory.enable_specialty_query),
+          snapshotPath: payload.memory.snapshot_path,
           taskId: payload.task?.id || '',
           taskSource: String(taskMeta.task_source ?? ''),
           forumGeneration: taskMeta.forum_generation as number | undefined,
