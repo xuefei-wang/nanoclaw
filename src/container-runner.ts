@@ -43,6 +43,7 @@ export interface ContainerInput {
   memoryMcp?: {
     dbPath: string;
     serverDir: string;
+    snapshotPath?: string;
     forumGeneration?: number;
     forumRound?: number;
     forumAgentId?: string;

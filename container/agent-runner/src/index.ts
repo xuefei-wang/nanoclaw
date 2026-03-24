@@ -32,6 +32,7 @@ interface ContainerInput {
   memoryMcp?: {
     dbPath: string;
     serverDir: string;
+    snapshotPath?: string;
     taskId?: string;
     taskSource?: string;
     forumGeneration?: number;
@@ -489,6 +490,9 @@ async function runQuery(
   // Register memory MCP server when config is present and server file exists.
   if (containerInput.memoryMcp && fs.existsSync('/app/memory/mcp_server.py')) {
     const dbFile = path.basename(containerInput.memoryMcp.dbPath);
+    const snapshotFile = containerInput.memoryMcp.snapshotPath
+      ? path.basename(containerInput.memoryMcp.snapshotPath)
+      : '';
     const taskSource = (containerInput.memoryMcp.taskSource || '').toLowerCase();
     const memoryToolset = taskSource === 'forum_debate' ? 'forum' : 'task';
     mcpServerConfig.memory = {
@@ -496,6 +500,7 @@ async function runQuery(
       args: ['/app/memory/mcp_server.py'],
       env: {
         MEMORY_DB_PATH: `/app/memory-db/${dbFile}`,
+        MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-db/${snapshotFile}` : '',
         MCP_TOOLSET: memoryToolset,
         FORUM_GENERATION: String(containerInput.memoryMcp.forumGeneration ?? 0),
         FORUM_ROUND: String(containerInput.memoryMcp.forumRound ?? 0),

@@ -34,6 +34,7 @@ interface MemoryConfig {
   db_path?: string;
   mcp_server_dir?: string;
   enable_specialty_query?: boolean;
+  snapshot_path?: string;
 }
 
 interface SwarmsPayload {
@@ -48,6 +49,7 @@ interface SwarmsPayload {
     db_path: string;
     mcp_server_dir: string;
     enable_specialty_query?: boolean;
+    snapshot_path?: string;
   };
 }
 
@@ -409,6 +411,7 @@ async function main(): Promise<void> {
       ? {
           dbPath: payload.memory.db_path,
           serverDir: payload.memory.mcp_server_dir,
+          snapshotPath: payload.memory.snapshot_path,
           taskId: payload.task?.id || '',
           taskSource: String(taskMeta.task_source ?? ''),
           forumGeneration: taskMeta.forum_generation as number | undefined,
