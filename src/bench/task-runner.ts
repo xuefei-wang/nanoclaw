@@ -353,8 +353,11 @@ async function main(): Promise<void> {
   const memoryDbPath = payload.memory?.db_path || '';
   const mcpServerDir = payload.memory?.mcp_server_dir || '';
   const memorySnapshotPath = payload.memory?.snapshot_path || '';
-  const taskSource = String((payload.task?.metadata || {}).task_source || '').toLowerCase();
-  const forumWritesNeeded = taskSource === 'forum_debate' || taskSource === 'forum_self';
+  const taskSource = String(
+    (payload.task?.metadata || {}).task_source || '',
+  ).toLowerCase();
+  const forumWritesNeeded =
+    taskSource === 'forum_debate' || taskSource === 'forum_self';
 
   const additionalMounts: Array<{
     hostPath: string;

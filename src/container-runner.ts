@@ -330,7 +330,8 @@ export async function runContainerAgent(
     } else {
       const dbDir = path.dirname(input.memoryMcp.dbPath);
       const taskSource = String(input.memoryMcp.taskSource || '').toLowerCase();
-      const forumWritesNeeded = taskSource === 'forum_debate' || taskSource === 'forum_self';
+      const forumWritesNeeded =
+        taskSource === 'forum_debate' || taskSource === 'forum_self';
       if (fs.existsSync(dbDir)) {
         mounts.push({
           hostPath: dbDir,
