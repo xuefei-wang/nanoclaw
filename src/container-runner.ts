@@ -44,10 +44,14 @@ export interface ContainerInput {
     dbPath: string;
     serverDir: string;
     snapshotPath?: string;
+    enableSpecialtyQuery?: boolean;
+    taskId?: string;
+    taskSource?: string;
     forumGeneration?: number;
     forumRound?: number;
     forumAgentId?: string;
     forumExpectedAgents?: number;
+    forumTaskIds?: string[];
     experiment?: string;
   };
 }
@@ -331,11 +335,14 @@ export async function runContainerAgent(
       );
     } else {
       const dbDir = path.dirname(input.memoryMcp.dbPath);
+      const taskSource = String(input.memoryMcp.taskSource || '').toLowerCase();
+      const forumWritesNeeded =
+        taskSource === 'forum_debate' || taskSource === 'forum_self';
       if (fs.existsSync(dbDir)) {
         mounts.push({
           hostPath: dbDir,
           containerPath: '/app/memory-db',
-          readonly: false,
+          readonly: !forumWritesNeeded,
         });
       } else {
         logger.warn(
@@ -354,6 +361,22 @@ export async function runContainerAgent(
           { group: group.name, serverDir: input.memoryMcp.serverDir },
           'Memory MCP server directory does not exist — memory MCP will not be available',
         );
+      }
+      if (input.memoryMcp.snapshotPath) {
+        const snapshotPath = path.resolve(input.memoryMcp.snapshotPath);
+        const snapshotDir = path.dirname(snapshotPath);
+        if (fs.existsSync(snapshotPath)) {
+          mounts.push({
+            hostPath: snapshotDir,
+            containerPath: '/app/memory-snapshot',
+            readonly: true,
+          });
+        } else {
+          logger.warn(
+            { group: group.name, snapshotPath },
+            'Memory snapshot file does not exist — snapshot-backed memory MCP will not be available',
+          );
+        }
       }
     }
   }

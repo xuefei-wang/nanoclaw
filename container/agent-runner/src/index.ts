@@ -33,6 +33,7 @@ interface ContainerInput {
     dbPath: string;
     serverDir: string;
     snapshotPath?: string;
+    enableSpecialtyQuery?: boolean;
     taskId?: string;
     taskSource?: string;
     forumGeneration?: number;
@@ -40,7 +41,6 @@ interface ContainerInput {
     forumAgentId?: string;
     forumExpectedAgents?: number;
     forumTaskIds?: string[];
-    enableSpecialtyQuery?: boolean;
     experiment?: string;
   };
 }
@@ -501,13 +501,13 @@ async function runQuery(
       env: {
         MEMORY_DB_PATH: `/app/memory-db/${dbFile}`,
         MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-db/${snapshotFile}` : '',
+        MEMORY_ENABLE_SPECIALTY_QUERY: containerInput.memoryMcp.enableSpecialtyQuery ? '1' : '0',
         MCP_TOOLSET: memoryToolset,
         FORUM_GENERATION: String(containerInput.memoryMcp.forumGeneration ?? 0),
         FORUM_ROUND: String(containerInput.memoryMcp.forumRound ?? 0),
         FORUM_AGENT_ID: containerInput.memoryMcp.forumAgentId ?? '',
         FORUM_EXPECTED_AGENTS: String(containerInput.memoryMcp.forumExpectedAgents ?? 0),
         FORUM_TASK_IDS: (containerInput.memoryMcp.forumTaskIds || []).join(','),
-        MEMORY_ENABLE_SPECIALTY_QUERY: containerInput.memoryMcp.enableSpecialtyQuery ? '1' : '0',
         MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
       },
     };
@@ -522,6 +522,7 @@ async function runQuery(
           MCP_TOOLSET: 'arc',
           ARC_TASK_ID: containerInput.memoryMcp.taskId ?? '',
           MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
+          MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-db/${snapshotFile}` : '',
         },
       };
       allowedToolsList.push('mcp__arc__*');
