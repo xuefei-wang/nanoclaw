@@ -18,6 +18,7 @@ interface WorkspaceSeed {
   instruction_md?: string;
   memory_md?: string;
   task_md?: string;
+  tools_md?: string;
   task_files?: Record<string, string>;
   repo_source_path?: string;
 }
@@ -131,6 +132,11 @@ function seedWorkspace(
 
   writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
   writeText(path.join(workspaceRoot, 'MEMORY.md'), memory);
+
+  const tools = (seed.tools_md || '').trim();
+  if (tools) {
+    writeText(path.join(workspaceRoot, 'TOOLS.md'), tools + '\n');
+  }
   const tasksRoot = path.join(workspaceRoot, 'tasks');
   ensureDir(tasksRoot);
 
@@ -319,6 +325,7 @@ function buildPrompt(payload: SwarmsPayload): string {
     '- Shared guidance:',
     '  - /workspace/group/workspace/INSTRUCTION.md',
     '  - /workspace/group/workspace/MEMORY.md (pointers to collective memory)',
+    '  - /workspace/group/workspace/TOOLS.md (available tools and when to use them)',
     `- Active task workspace: ${activeTaskDir}`,
     `  - ${activeTaskDir}/TASK.md`,
     `  - ${activeTaskDir}/repo`,
@@ -432,6 +439,7 @@ async function main(): Promise<void> {
                 .map((x) => String(x || '').trim())
                 .filter(Boolean)
             : [],
+          enableSpecialtyQuery: !!payload.memory?.enable_specialty_query,
           experiment: payload.experiment_name,
         }
       : undefined;
