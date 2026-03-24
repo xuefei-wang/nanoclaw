@@ -394,12 +394,18 @@ async function main(): Promise<void> {
     });
   }
   const resolvedSnapshotPath = memorySnapshotPath ? path.resolve(memorySnapshotPath) : '';
-  if (resolvedSnapshotPath && fs.existsSync(resolvedSnapshotPath)) {
-    additionalMounts.push({
-      hostPath: path.dirname(resolvedSnapshotPath),
-      containerPath: '/app/memory-snapshot',
-      readonly: true,
-    });
+  if (resolvedSnapshotPath) {
+    if (fs.existsSync(resolvedSnapshotPath)) {
+      additionalMounts.push({
+        hostPath: path.dirname(resolvedSnapshotPath),
+        containerPath: '/app/memory-snapshot',
+        readonly: true,
+      });
+    } else {
+      process.stderr.write(
+        `Warning: Memory snapshot file does not exist: ${resolvedSnapshotPath} — snapshot-backed memory MCP will not be available\n`,
+      );
+    }
   }
 
   // Disable agent teams in bench mode to prevent token-consuming sub-agents
