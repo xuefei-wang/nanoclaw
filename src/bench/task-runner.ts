@@ -393,9 +393,10 @@ async function main(): Promise<void> {
       readonly: true,
     });
   }
-  if (memorySnapshotPath && fs.existsSync(memorySnapshotPath)) {
+  const resolvedSnapshotPath = memorySnapshotPath ? path.resolve(memorySnapshotPath) : '';
+  if (resolvedSnapshotPath && fs.existsSync(resolvedSnapshotPath)) {
     additionalMounts.push({
-      hostPath: path.dirname(path.resolve(memorySnapshotPath)),
+      hostPath: path.dirname(resolvedSnapshotPath),
       containerPath: '/app/memory-snapshot',
       readonly: true,
     });
