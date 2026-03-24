@@ -357,9 +357,9 @@ export async function runContainerAgent(
         );
       }
       if (input.memoryMcp.snapshotPath) {
-        const snapshotPath = input.memoryMcp.snapshotPath;
+        const snapshotPath = path.resolve(input.memoryMcp.snapshotPath);
         const snapshotDir = path.dirname(snapshotPath);
-        if (fs.existsSync(snapshotDir)) {
+        if (fs.existsSync(snapshotPath)) {
           mounts.push({
             hostPath: snapshotDir,
             containerPath: '/app/memory-snapshot',
@@ -367,8 +367,8 @@ export async function runContainerAgent(
           });
         } else {
           logger.warn(
-            { group: group.name, snapshotDir },
-            'Memory snapshot directory does not exist — snapshot-backed memory MCP will not be available',
+            { group: group.name, snapshotPath },
+            'Memory snapshot file does not exist — snapshot-backed memory MCP will not be available',
           );
         }
       }
