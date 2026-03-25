@@ -34,6 +34,7 @@ interface MemoryConfig {
   mcp_server_dir?: string;
   enable_specialty_query?: boolean;
   snapshot_path?: string;
+  enable_arc_tools?: boolean;
 }
 
 interface SwarmsPayload {
@@ -49,6 +50,7 @@ interface SwarmsPayload {
     mcp_server_dir: string;
     enable_specialty_query?: boolean;
     snapshot_path?: string;
+    enable_arc_tools?: boolean;
   };
 }
 
@@ -418,6 +420,7 @@ async function main(): Promise<void> {
           dbPath: payload.memory.db_path,
           serverDir: payload.memory.mcp_server_dir,
           enableSpecialtyQuery: Boolean(payload.memory.enable_specialty_query),
+          enableArcTools: payload.memory.enable_arc_tools !== false,
           snapshotPath: payload.memory.snapshot_path,
           taskId: payload.task?.id || '',
           taskSource: String(taskMeta.task_source ?? ''),

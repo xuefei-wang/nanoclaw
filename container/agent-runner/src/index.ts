@@ -34,6 +34,7 @@ interface ContainerInput {
     serverDir: string;
     snapshotPath?: string;
     enableSpecialtyQuery?: boolean;
+    enableArcTools?: boolean;
     taskId?: string;
     taskSource?: string;
     forumGeneration?: number;
@@ -259,6 +260,15 @@ function extractAssistantText(message: unknown): string | null {
   return parts || null;
 }
 
+function extractStructuredForumText(message: unknown): string | null {
+  const text = extractAssistantText(message);
+  if (!text) return null;
+  const match = text.match(/(?:^|\n)\s*(INSIGHT|COMMENT)\s*\n[\s\S]*$/m);
+  if (!match || match.index === undefined) return null;
+  const structured = text.slice(match.index).trim();
+  return structured || null;
+}
+
 function parseTranscript(content: string): ParsedMessage[] {
   const messages: ParsedMessage[] = [];
 
@@ -423,6 +433,7 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
   let lastAssistantFallback: string | null = null;
+  let bestStructuredForumText: string | null = null;
   const toolTrace: Array<Record<string, unknown>> = [];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -513,7 +524,7 @@ async function runQuery(
     };
     allowedToolsList.push('mcp__memory__*');
 
-    if (taskSource === 'arc') {
+    if (taskSource === 'arc' && containerInput.memoryMcp.enableArcTools !== false) {
       mcpServerConfig.arc = {
         command: 'python3',
         args: ['/app/memory/mcp_server.py'],
@@ -615,6 +626,13 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
+    if (message.type === 'assistant') {
+      const structuredForumText = extractStructuredForumText(message);
+      if (structuredForumText) {
+        bestStructuredForumText = structuredForumText;
+      }
+    }
+
     if (containerInput.isScheduledTask && message.type === 'assistant') {
       const assistantText = extractAssistantText(message);
       lastAssistantFallback = assistantText || (() => {
@@ -639,10 +657,11 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      const effectiveResult = bestStructuredForumText || textResult || null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: effectiveResult,
         newSessionId,
         toolTrace: toolTrace.slice(-1000),
         input_tokens: totalInputTokens,
@@ -665,7 +684,7 @@ async function runQuery(
   if (containerInput.isScheduledTask && resultCount === 0 && lastAssistantFallback) {
     writeOutput({
       status: 'success',
-      result: lastAssistantFallback,
+      result: bestStructuredForumText || lastAssistantFallback,
       newSessionId,
       toolTrace: toolTrace.slice(-1000),
       input_tokens: totalInputTokens,
