@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { extractAssistantText, extractStructuredForumText } from './extract.js';
 
 interface ContainerInput {
   prompt: string;
@@ -248,26 +249,7 @@ interface ParsedMessage {
   content: string;
 }
 
-function extractAssistantText(message: unknown): string | null {
-  const msg = message as { message?: { content?: unknown } };
-  const content = msg.message?.content;
-  if (!Array.isArray(content)) return null;
-  const parts = content
-    .filter((c) => typeof c === 'object' && c !== null && (c as { type?: string }).type === 'text')
-    .map((c) => String((c as { text?: unknown }).text ?? ''))
-    .join('')
-    .trim();
-  return parts || null;
-}
-
-function extractStructuredForumText(message: unknown): string | null {
-  const text = extractAssistantText(message);
-  if (!text) return null;
-  const match = text.match(/(?:^|\n)\s*(INSIGHT|COMMENT)\s*\n[\s\S]*$/m);
-  if (!match || match.index === undefined) return null;
-  const structured = text.slice(match.index).trim();
-  return structured || null;
-}
+// extractAssistantText and extractStructuredForumText imported from ./extract.js
 
 function parseTranscript(content: string): ParsedMessage[] {
   const messages: ParsedMessage[] = [];
@@ -434,6 +416,7 @@ async function runQuery(
   let resultCount = 0;
   let lastAssistantFallback: string | null = null;
   let bestStructuredForumText: string | null = null;
+  const isForumTask = (containerInput.memoryMcp?.taskSource || '').toLowerCase() === 'forum_debate';
   const toolTrace: Array<Record<string, unknown>> = [];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -626,7 +609,7 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
-    if (message.type === 'assistant') {
+    if (isForumTask && message.type === 'assistant') {
       const structuredForumText = extractStructuredForumText(message);
       if (structuredForumText) {
         bestStructuredForumText = structuredForumText;
