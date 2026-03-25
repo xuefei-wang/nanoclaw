@@ -500,6 +500,7 @@ async function runQuery(
       args: ['/app/memory/mcp_server.py'],
       env: {
         MEMORY_DB_PATH: `/app/memory-db/${dbFile}`,
+        MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-db/${snapshotFile}` : '',
         MEMORY_ENABLE_SPECIALTY_QUERY: containerInput.memoryMcp.enableSpecialtyQuery ? '1' : '0',
         MCP_TOOLSET: memoryToolset,
         FORUM_GENERATION: String(containerInput.memoryMcp.forumGeneration ?? 0),
@@ -508,7 +509,6 @@ async function runQuery(
         FORUM_EXPECTED_AGENTS: String(containerInput.memoryMcp.forumExpectedAgents ?? 0),
         FORUM_TASK_IDS: (containerInput.memoryMcp.forumTaskIds || []).join(','),
         MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
-        MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-snapshot/${snapshotFile}` : '',
       },
     };
     allowedToolsList.push('mcp__memory__*');
@@ -522,7 +522,7 @@ async function runQuery(
           MCP_TOOLSET: 'arc',
           ARC_TASK_ID: containerInput.memoryMcp.taskId ?? '',
           MEMORY_EXPERIMENT: containerInput.memoryMcp.experiment ?? '',
-          MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-snapshot/${snapshotFile}` : '',
+          MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-db/${snapshotFile}` : '',
         },
       };
       allowedToolsList.push('mcp__arc__*');
