@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { extractAssistantText, extractStructuredForumText } from './extract.js';
 
 interface ContainerInput {
   prompt: string;
@@ -34,6 +35,7 @@ interface ContainerInput {
     serverDir: string;
     snapshotPath?: string;
     enableSpecialtyQuery?: boolean;
+    enableArcTools?: boolean;
     taskId?: string;
     taskSource?: string;
     forumGeneration?: number;
@@ -247,17 +249,7 @@ interface ParsedMessage {
   content: string;
 }
 
-function extractAssistantText(message: unknown): string | null {
-  const msg = message as { message?: { content?: unknown } };
-  const content = msg.message?.content;
-  if (!Array.isArray(content)) return null;
-  const parts = content
-    .filter((c) => typeof c === 'object' && c !== null && (c as { type?: string }).type === 'text')
-    .map((c) => String((c as { text?: unknown }).text ?? ''))
-    .join('')
-    .trim();
-  return parts || null;
-}
+// extractAssistantText and extractStructuredForumText imported from ./extract.js
 
 function parseTranscript(content: string): ParsedMessage[] {
   const messages: ParsedMessage[] = [];
@@ -423,6 +415,8 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
   let lastAssistantFallback: string | null = null;
+  let bestStructuredForumText: string | null = null;
+  const isForumTask = (containerInput.memoryMcp?.taskSource || '').toLowerCase() === 'forum_debate';
   const toolTrace: Array<Record<string, unknown>> = [];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -513,7 +507,7 @@ async function runQuery(
     };
     allowedToolsList.push('mcp__memory__*');
 
-    if (taskSource === 'arc') {
+    if (taskSource === 'arc' && containerInput.memoryMcp.enableArcTools !== false) {
       mcpServerConfig.arc = {
         command: 'python3',
         args: ['/app/memory/mcp_server.py'],
@@ -615,6 +609,13 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
+    if (isForumTask && message.type === 'assistant') {
+      const structuredForumText = extractStructuredForumText(message);
+      if (structuredForumText) {
+        bestStructuredForumText = structuredForumText;
+      }
+    }
+
     if (containerInput.isScheduledTask && message.type === 'assistant') {
       const assistantText = extractAssistantText(message);
       lastAssistantFallback = assistantText || (() => {
@@ -639,10 +640,11 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      const effectiveResult = bestStructuredForumText || textResult || null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: effectiveResult,
         newSessionId,
         toolTrace: toolTrace.slice(-1000),
         input_tokens: totalInputTokens,
@@ -665,7 +667,7 @@ async function runQuery(
   if (containerInput.isScheduledTask && resultCount === 0 && lastAssistantFallback) {
     writeOutput({
       status: 'success',
-      result: lastAssistantFallback,
+      result: bestStructuredForumText || lastAssistantFallback,
       newSessionId,
       toolTrace: toolTrace.slice(-1000),
       input_tokens: totalInputTokens,
