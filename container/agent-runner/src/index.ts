@@ -35,6 +35,7 @@ interface ContainerInput {
     snapshotPath?: string;
     enableSpecialtyQuery?: boolean;
     enableArcTools?: boolean;
+    forumProxyUrl?: string;
     taskId?: string;
     taskSource?: string;
     forumGeneration?: number;
@@ -513,6 +514,7 @@ async function runQuery(
         MEMORY_DB_PATH: `/app/memory-db/${dbFile}`,
         MEMORY_ENABLE_SPECIALTY_QUERY: containerInput.memoryMcp.enableSpecialtyQuery ? '1' : '0',
         MCP_TOOLSET: memoryToolset,
+        FORUM_PROXY_URL: containerInput.memoryMcp.forumProxyUrl ?? '',
         FORUM_GENERATION: String(containerInput.memoryMcp.forumGeneration ?? 0),
         FORUM_ROUND: String(containerInput.memoryMcp.forumRound ?? 0),
         FORUM_AGENT_ID: containerInput.memoryMcp.forumAgentId ?? '',

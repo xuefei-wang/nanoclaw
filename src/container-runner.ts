@@ -46,6 +46,7 @@ export interface ContainerInput {
     snapshotPath?: string;
     enableSpecialtyQuery?: boolean;
     enableArcTools?: boolean;
+    forumProxyUrl?: string;
     taskId?: string;
     taskSource?: string;
     forumGeneration?: number;

@@ -35,6 +35,7 @@ interface MemoryConfig {
   enable_specialty_query?: boolean;
   snapshot_path?: string;
   enable_arc_tools?: boolean;
+  forum_proxy_url?: string;
 }
 
 interface SwarmsPayload {
@@ -51,6 +52,7 @@ interface SwarmsPayload {
     enable_specialty_query?: boolean;
     snapshot_path?: string;
     enable_arc_tools?: boolean;
+    forum_proxy_url?: string;
   };
 }
 
@@ -422,6 +424,7 @@ async function main(): Promise<void> {
           enableSpecialtyQuery: Boolean(payload.memory.enable_specialty_query),
           enableArcTools: payload.memory.enable_arc_tools !== false,
           snapshotPath: payload.memory.snapshot_path,
+          forumProxyUrl: payload.memory.forum_proxy_url,
           taskId: payload.task?.id || '',
           taskSource: String(taskMeta.task_source ?? ''),
           forumGeneration: taskMeta.forum_generation as number | undefined,
