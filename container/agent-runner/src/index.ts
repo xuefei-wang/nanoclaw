@@ -503,6 +503,7 @@ async function runQuery(
         MEMORY_SNAPSHOT_PATH: snapshotFile ? `/app/memory-db/${snapshotFile}` : '',
         MEMORY_ENABLE_SPECIALTY_QUERY: containerInput.memoryMcp.enableSpecialtyQuery ? '1' : '0',
         MCP_TOOLSET: memoryToolset,
+        FORUM_PROXY_URL: containerInput.memoryMcp.forumProxyUrl ?? '',
         FORUM_GENERATION: String(containerInput.memoryMcp.forumGeneration ?? 0),
         FORUM_ROUND: String(containerInput.memoryMcp.forumRound ?? 0),
         FORUM_AGENT_ID: containerInput.memoryMcp.forumAgentId ?? '',

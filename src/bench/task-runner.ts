@@ -35,6 +35,7 @@ interface MemoryConfig {
   mcp_server_dir?: string;
   enable_specialty_query?: boolean;
   snapshot_path?: string;
+  forum_proxy_url?: string;
 }
 
 interface SwarmsPayload {
@@ -50,6 +51,7 @@ interface SwarmsPayload {
     mcp_server_dir: string;
     enable_specialty_query?: boolean;
     snapshot_path?: string;
+    forum_proxy_url?: string;
   };
 }
 
@@ -393,7 +395,9 @@ async function main(): Promise<void> {
       readonly: true,
     });
   }
-  const resolvedSnapshotPath = memorySnapshotPath ? path.resolve(memorySnapshotPath) : '';
+  const resolvedSnapshotPath = memorySnapshotPath
+    ? path.resolve(memorySnapshotPath)
+    : '';
   if (resolvedSnapshotPath) {
     if (fs.existsSync(resolvedSnapshotPath)) {
       additionalMounts.push({
@@ -433,6 +437,7 @@ async function main(): Promise<void> {
           serverDir: payload.memory.mcp_server_dir,
           enableSpecialtyQuery: Boolean(payload.memory.enable_specialty_query),
           snapshotPath: payload.memory.snapshot_path,
+          forumProxyUrl: payload.memory.forum_proxy_url,
           taskId: payload.task?.id || '',
           taskSource: String(taskMeta.task_source ?? ''),
           forumGeneration: taskMeta.forum_generation as number | undefined,
@@ -446,7 +451,6 @@ async function main(): Promise<void> {
                 .map((x) => String(x || '').trim())
                 .filter(Boolean)
             : [],
-          enableSpecialtyQuery: !!payload.memory?.enable_specialty_query,
           experiment: payload.experiment_name,
         }
       : undefined;
