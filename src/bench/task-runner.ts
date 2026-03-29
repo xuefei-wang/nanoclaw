@@ -449,7 +449,6 @@ async function main(): Promise<void> {
                 .map((x) => String(x || '').trim())
                 .filter(Boolean)
             : [],
-          enableSpecialtyQuery: !!payload.memory?.enable_specialty_query,
           experiment: payload.experiment_name,
         }
       : undefined;
