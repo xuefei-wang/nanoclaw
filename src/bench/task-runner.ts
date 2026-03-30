@@ -95,6 +95,28 @@ function writeText(filePath: string, content: string): void {
   fs.writeFileSync(filePath, content, 'utf-8');
 }
 
+function removeFileIfExists(filePath: string): void {
+  try {
+    fs.rmSync(filePath, { force: true });
+  } catch {
+    // best-effort cleanup only
+  }
+}
+
+export function buildWorkspaceMemoryMd(seedMemoryMd: string): string {
+  if (!seedMemoryMd.trim()) {
+    return '';
+  }
+  return [
+    '# MEMORY',
+    '',
+    'Seed context is already loaded into the system prompt for this run.',
+    'This file is only a pointer/debug aid.',
+    '',
+    'Use task-local files and MCP memory tools for detailed retrieval.',
+  ].join('\n');
+}
+
 function copyRepo(repoSourcePath: string, repoDst: string): void {
   if (!repoSourcePath) {
     ensureDir(repoDst);
@@ -119,6 +141,10 @@ function seedWorkspace(
 ): void {
   const groupDir = resolveGroupFolderPath(groupFolder);
   ensureDir(groupDir);
+  const seedContextPath = path.join(groupDir, '.seed_context');
+  // Guardrail: keep transient seed context explicitly run-scoped and avoid
+  // leaking stale seed text into later executions when folders are reused.
+  removeFileIfExists(seedContextPath);
 
   const workspaceRoot = path.join(groupDir, 'workspace');
   if (wipeWorkspacePerTask) {
@@ -128,9 +154,14 @@ function seedWorkspace(
 
   const seed = payload.workspace_seed || {};
   const instruction = (seed.instruction_md || '').trim() + '\n';
-  const memory = (seed.memory_md || '').trim() + '\n';
+  const seedMemory = (seed.memory_md || '').trim();
+  const memory = buildWorkspaceMemoryMd(seedMemory).trim() + '\n';
   const taskMd = (seed.task_md || '').trim() + '\n';
   const taskFiles = seed.task_files || {};
+
+  if (seedMemory) {
+    writeText(seedContextPath, seedMemory + '\n');
+  }
 
   writeText(path.join(workspaceRoot, 'INSTRUCTION.md'), instruction);
   writeText(path.join(workspaceRoot, 'MEMORY.md'), memory);
@@ -317,7 +348,7 @@ function collectConversationArchives(
   return out;
 }
 
-function buildPrompt(payload: SwarmsPayload): string {
+export function buildPrompt(payload: SwarmsPayload): string {
   const instruction = (payload.execution_prompt || '').trim();
   const taskFolder = safeTaskDir(payload.task?.id || 'task');
   const activeTaskDir = `/workspace/group/workspace/tasks/${taskFolder}`;
@@ -326,7 +357,8 @@ function buildPrompt(payload: SwarmsPayload): string {
     '- Only edit files under the active task repo path.',
     '- Shared guidance:',
     '  - /workspace/group/workspace/INSTRUCTION.md',
-    '  - /workspace/group/workspace/MEMORY.md (pointers to collective memory)',
+    '  - Seed context is already loaded into the system prompt when present.',
+    '  - /workspace/group/workspace/MEMORY.md (pointer/debug summary only)',
     '  - /workspace/group/workspace/TOOLS.md (available tools and when to use them)',
     `- Active task workspace: ${activeTaskDir}`,
     `  - ${activeTaskDir}/TASK.md`,
@@ -449,7 +481,6 @@ async function main(): Promise<void> {
                 .map((x) => String(x || '').trim())
                 .filter(Boolean)
             : [],
-          enableSpecialtyQuery: !!payload.memory?.enable_specialty_query,
           experiment: payload.experiment_name,
         }
       : undefined;
@@ -550,7 +581,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(1);
-});
+const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (import.meta.url === `file://${entryPath}`) {
+  main().catch((err) => {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  });
+}

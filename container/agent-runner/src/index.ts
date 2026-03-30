@@ -19,6 +19,7 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { extractAssistantText, extractStructuredForumText } from './extract.js';
+import { buildSystemPromptAppend, summarizeToolInput } from './prompt-utils.js';
 
 interface ContainerInput {
   prompt: string;
@@ -429,6 +430,12 @@ async function runQuery(
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
+  const seedContextPath = '/workspace/group/.seed_context';
+  let seedContext: string | undefined;
+  if (fs.existsSync(seedContextPath)) {
+    seedContext = fs.readFileSync(seedContextPath, 'utf-8');
+  }
+  const systemPromptAppend = buildSystemPromptAppend(globalClaudeMd, seedContext);
 
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
@@ -533,8 +540,8 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+      systemPrompt: systemPromptAppend
+        ? { type: 'preset' as const, preset: 'claude_code' as const, append: systemPromptAppend }
         : undefined,
       allowedTools: allowedToolsList,
       env: sdkEnv,
@@ -571,11 +578,26 @@ async function runQuery(
     // SDK embeds tool calls as content blocks with type 'tool_use' inside
     // the assistant message's message.content array.
     if (message.type === 'assistant') {
-      const msgContent = (message as { message?: { content?: Array<{ type: string; name?: string; id?: string }> } }).message?.content;
+      const msgContent = (
+        message as {
+          message?: {
+            content?: Array<{
+              type: string;
+              name?: string;
+              id?: string;
+              input?: unknown;
+            }>;
+          };
+        }
+      ).message?.content;
       if (Array.isArray(msgContent)) {
         const toolUses = msgContent
           .filter((block) => block.type === 'tool_use' && block.name)
-          .map((block) => ({ name: block.name!, id: block.id }));
+          .map((block) => ({
+            name: block.name!,
+            id: block.id,
+            input: block.input,
+          }));
         if (toolUses.length > 0) {
           record.tool_uses = toolUses.map((t) => t.name);
           // Also emit individual tool trace entries for each tool call
@@ -585,6 +607,7 @@ async function runQuery(
               type: 'tool_call',
               tool_name: tu.name,
               tool_use_id: tu.id,
+              ...summarizeToolInput(tu.name, tu.input),
               ts: record.ts,
             });
           }
@@ -783,4 +806,7 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (fileURLToPath(import.meta.url) === entryPath) {
+  main();
+}
