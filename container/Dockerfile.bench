@@ -29,6 +29,14 @@ RUN npm install
 # Copy source code
 COPY agent-runner/ ./
 
+# Pre-compile TypeScript so containers start with a warm cache.
+# The entrypoint hash-check will detect a cache hit and skip recompilation.
+# If host-mounted source differs, the hash changes and tsc runs as before.
+RUN npx tsc --outDir /tmp/dist \
+ && SRC_HASH=$(find src -type f -name "*.ts" -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d" " -f1) \
+ && echo "$SRC_HASH" > /tmp/dist/.src_hash \
+ && ln -sfn /app/node_modules /tmp/dist/node_modules
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /app/memory-db
 
