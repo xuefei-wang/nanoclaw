@@ -1,5 +1,6 @@
 # NanoClaw Agent Container — Benchmark variant (no browser deps)
-# Runs Claude Agent SDK in isolated container for benchmark tasks
+# Runs Claude Agent SDK or OpenAI Agents SDK in isolated container for benchmark tasks
+# Supports MODEL_PROVIDER=anthropic (default) or MODEL_PROVIDER=openai
 # ~400MB smaller than the full Dockerfile (no Chromium/X11)
 
 FROM node:22-slim
@@ -10,9 +11,11 @@ RUN apt-get update && apt-get install -y \
     git \
     python3 \
     python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --break-system-packages \
-      sqlite-vec
+      sqlite-vec \
+      openai-agents
 
 # Install claude-code globally (no agent-browser needed for benchmarks)
 RUN npm install -g @anthropic-ai/claude-code
@@ -29,6 +32,9 @@ RUN npm install
 # Copy source code
 COPY agent-runner/ ./
 
+# Copy OpenAI agent runner
+COPY openai-runner/agent_runner.py /app/openai-runner/agent_runner.py
+
 # Pre-compile TypeScript so containers start with a warm cache.
 # The entrypoint hash-check will detect a cache hit and skip recompilation.
 # If host-mounted source differs, the hash changes and tsc runs as before.
@@ -40,11 +46,11 @@ RUN npx tsc --outDir /tmp/dist \
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /app/memory-db
 
-# Create entrypoint script with compile caching
-# If /tmp/dist/index.js already exists and source hasn't changed, skip recompile.
-# Secrets are passed via stdin JSON — temp file is deleted immediately after Node reads it
-# Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app\nSRC_HASH=$(find src -type f -name "*.ts" -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d" " -f1)\nCACHE_HASH=""\nif [ -f /tmp/dist/.src_hash ]; then\n  CACHE_HASH=$(cat /tmp/dist/.src_hash)\nfi\nif [ "$SRC_HASH" != "$CACHE_HASH" ] || [ ! -f /tmp/dist/index.js ]; then\n  npx tsc --outDir /tmp/dist 2>&1 >&2\n  echo "$SRC_HASH" > /tmp/dist/.src_hash\n  ln -sfn /app/node_modules /tmp/dist/node_modules\nfi\nchmod -R a-w /tmp/dist 2>/dev/null || true\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Create entrypoint script with compile caching and provider selection
+# MODEL_PROVIDER=openai -> Python OpenAI Agents SDK runner
+# MODEL_PROVIDER=anthropic (default) -> TypeScript Claude SDK runner
+# Secrets are passed via stdin JSON — temp file is deleted immediately after runner reads it
+RUN printf '#!/bin/bash\nset -e\ncd /app\n\n# Read input to temp file\ncat > /tmp/input.json\n\n# Check provider - default to anthropic\nPROVIDER="${MODEL_PROVIDER:-anthropic}"\n\nif [ "$PROVIDER" = "openai" ]; then\n  echo "[entrypoint] Using OpenAI Agents SDK" >&2\n  python3 /app/openai-runner/agent_runner.py < /tmp/input.json\nelse\n  echo "[entrypoint] Using Claude Agent SDK" >&2\n  # TypeScript compile caching\n  SRC_HASH=$(find src -type f -name "*.ts" -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d" " -f1)\n  CACHE_HASH=""\n  if [ -f /tmp/dist/.src_hash ]; then\n    CACHE_HASH=$(cat /tmp/dist/.src_hash)\n  fi\n  if [ "$SRC_HASH" != "$CACHE_HASH" ] || [ ! -f /tmp/dist/index.js ]; then\n    npx tsc --outDir /tmp/dist 2>&1 >&2\n    echo "$SRC_HASH" > /tmp/dist/.src_hash\n    ln -sfn /app/node_modules /tmp/dist/node_modules\n  fi\n  chmod -R a-w /tmp/dist 2>/dev/null || true\n  node /tmp/dist/index.js < /tmp/input.json\nfi\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node

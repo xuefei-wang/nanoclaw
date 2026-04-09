@@ -254,6 +254,7 @@ function readSecrets(): Record<string, string> {
     'CLAUDE_CODE_OAUTH_REFRESH_TOKEN',
     'CLAUDE_CODE_OAUTH_SCOPES',
     'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
   ]);
   const out: Record<string, string> = { ...fromFile };
   for (const key of [
@@ -261,9 +262,10 @@ function readSecrets(): Record<string, string> {
     'CLAUDE_CODE_OAUTH_REFRESH_TOKEN',
     'CLAUDE_CODE_OAUTH_SCOPES',
     'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
   ]) {
     if (!out[key] && process.env[key]) {
-      out[key] = process.env[key]!;
+      out[key] = process.env[key]!
     }
   }
   return out;
