@@ -14,6 +14,7 @@ Output protocol:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -285,41 +286,34 @@ async def run_agent(container_input: ContainerInput) -> ContainerOutput:
             log("Registered ARC MCP server")
 
     try:
-        # Use async context managers for MCP servers
-        async with asyncio.TaskGroup() as tg:
-            server_contexts = []
+        async with contextlib.AsyncExitStack() as stack:
             for server in mcp_servers:
-                ctx = await server.__aenter__()
-                server_contexts.append((server, ctx))
+                await stack.enter_async_context(server)
 
-        # Create agent with MCP servers (empty list if no servers configured)
-        agent = Agent(
-            name="NanoClawOpenAIAgent",
-            instructions=system_prompt,
-            model=model,
-            mcp_servers=[s for s, _ in server_contexts] if server_contexts else [],
-        )
+            # Create agent with MCP servers
+            agent = Agent(
+                name="NanoClawOpenAIAgent",
+                instructions=system_prompt,
+                model=model,
+                mcp_servers=mcp_servers,
+            )
 
-        # Run the agent
-        log(f"Running agent with prompt ({len(prompt)} chars)")
-        result = await Runner.run(agent, prompt)
+            # Run the agent
+            log(f"Running agent with prompt ({len(prompt)} chars)")
+            result = await Runner.run(agent, prompt)
 
-        # Extract results
-        input_tokens, output_tokens = extract_token_usage(result)
-        tool_trace = extract_tool_trace(result)
-        final_output = getattr(result, "final_output", "") or ""
+            # Extract results
+            input_tokens, output_tokens = extract_token_usage(result)
+            tool_trace = extract_tool_trace(result)
+            final_output = getattr(result, "final_output", "") or ""
 
-        # Clean up MCP servers
-        for server, _ in server_contexts:
-            await server.__aexit__(None, None, None)
-
-        return ContainerOutput(
-            status="success",
-            result=final_output,
-            tool_trace=tool_trace,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
+            return ContainerOutput(
+                status="success",
+                result=final_output,
+                tool_trace=tool_trace,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
 
     except asyncio.TimeoutError:
         return ContainerOutput(
