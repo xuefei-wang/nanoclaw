@@ -104,17 +104,14 @@ function removeFileIfExists(filePath: string): void {
 }
 
 export function buildWorkspaceMemoryMd(seedMemoryMd: string): string {
-  if (!seedMemoryMd.trim()) {
-    return '';
+  const content = seedMemoryMd.trim();
+  if (!content) {
+    return '# Agent Memory\n\n(empty)\n';
   }
-  return [
-    '# MEMORY',
-    '',
-    'Seed context is already loaded into the system prompt for this run.',
-    'This file is only a pointer/debug aid.',
-    '',
-    'Use task-local files and MCP memory tools for detailed retrieval.',
-  ].join('\n');
+  // Write real memory content so agents reading MEMORY.md get useful data
+  // instead of a placeholder. The same content is also in the system prompt
+  // (via .seed_context) for agents that don't read the file.
+  return content;
 }
 
 function copyRepo(repoSourcePath: string, repoDst: string): void {
@@ -357,8 +354,8 @@ export function buildPrompt(payload: SwarmsPayload): string {
     '- Only edit files under the active task repo path.',
     '- Shared guidance:',
     '  - /workspace/group/workspace/INSTRUCTION.md',
-    '  - Seed context is already loaded into the system prompt when present.',
-    '  - /workspace/group/workspace/MEMORY.md (pointer/debug summary only)',
+    '  - Seed context is in MEMORY.md and the system prompt.',
+    '  - /workspace/group/workspace/MEMORY.md (prior attempts and seed insights)',
     '  - /workspace/group/workspace/TOOLS.md (available tools and when to use them)',
     `- Active task workspace: ${activeTaskDir}`,
     `  - ${activeTaskDir}/TASK.md`,
